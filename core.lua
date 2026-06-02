@@ -16,24 +16,82 @@ _G.MenuSelectionColor = {225, 17, 79, 220}
 _G.MenuSeparatorColor = {80, 80, 90, 100}
 _G.MenuPosX = 0.82
 
--- Textura para el banner (usamos una del juego)
-local BANNER_DICT = "commonmenu"
-local BANNER_TEXTURE = "interaction_bgd"
-
 function Notify(msg)
     SetNotificationTextEntry("STRING")
     AddTextComponentString(msg)
     DrawNotification(false, false)
 end
 
--- Cargar textura del banner
-Citizen.CreateThread(function()
-    RequestStreamedTextureDict(BANNER_DICT, false)
-    while not HasStreamedTextureDictLoaded(BANNER_DICT) do
-        Citizen.Wait(0)
+-- ============================================================================
+--                    BANNER CON IMAGEN DESDE URL (CORREGIDO)
+-- ============================================================================
+local BANNER_URL = "https://i.imgur.com/jnKfAh1.png" -- <--- TU ENLACE
+local runtimeTxd = nil
+local textureLoaded = false
+
+-- Función para cargar la imagen desde la URL
+local function loadBannerFromURL()
+    print("[SENTEX] Intentando cargar banner desde: " .. BANNER_URL)
+    
+    -- Crear el DUI (elemento de interfaz web invisible)
+    local duiObj = CreateDui(BANNER_URL, 512, 128)
+    if not duiObj then
+        print("[SENTEX] Error al crear DUI")
+        return false
     end
+    
+    local duiHandle = GetDuiHandle(duiObj)
+    if not duiHandle then
+        print("[SENTEX] Error al obtener handle del DUI")
+        return false
+    end
+    
+    -- Crear un diccionario de texturas en tiempo de ejecución
+    runtimeTxd = CreateRuntimeTxd('sentex_banner_txd')
+    if not runtimeTxd then
+        print("[SENTEX] Error al crear runtime TXD")
+        return false
+    end
+    
+    -- Convertir el contenido del DUI en una textura utilizable
+    local texture = CreateRuntimeTextureFromDuiHandle(runtimeTxd, 'banner_texture', duiHandle)
+    if not texture then
+        print("[SENTEX] Error al crear textura runtime")
+        return false
+    end
+    
+    textureLoaded = true
+    print("[SENTEX] Banner cargado exitosamente")
+    return true
+end
+
+-- Función para dibujar el banner (dentro del menú)
+local function DrawBanner(x, y, w, h)
+    if textureLoaded and runtimeTxd then
+        -- Dibujar la textura personalizada
+        DrawSprite(runtimeTxd, 'banner_texture', x, y, w, h, 0.0, 255, 255, 255, 255)
+    else
+        -- Fallback: rectángulo rojo simple por si algo falla
+        DrawRect(x, y, w, h, 225, 17, 79, 255)
+        SetTextFont(1)
+        SetTextScale(0.48, 0.48)
+        SetTextColour(255, 255, 255, 255)
+        SetTextCentre(true)
+        SetTextEntry("STRING")
+        AddTextComponentString("SENTEX v3.7 | SECURITY TEST")
+        DrawText(x, y - 0.010)
+    end
+end
+
+-- Cargar el banner cuando el script se inicia
+Citizen.CreateThread(function()
+    Citizen.Wait(1000) -- Esperar un segundo para asegurar que todo está listo
+    loadBannerFromURL()
 end)
 
+-- ============================================================================
+--                    LÓGICA DE NAVEGACIÓN Y DIBUJO
+-- ============================================================================
 local function UpdateScroll(totalOpts)
     if totalOpts <= _G.MenuMaxVisible then
         _G.MenuScroll = 0
@@ -50,29 +108,13 @@ local function UpdateScroll(totalOpts)
     end
 end
 
--- Banner con imagen y texto superpuesto
-local function DrawBanner(x, y, w, h)
-    -- Dibujar sprite como fondo del banner
-    DrawSprite(BANNER_DICT, BANNER_TEXTURE, x, y, w, h, 0.0, 255, 255, 255, 255)
-    -- Texto del título
-    SetTextFont(1)
-    SetTextScale(0.55, 0.55)
-    SetTextColour(255, 255, 255, 255)
-    SetTextCentre(true)
-    SetTextEntry("STRING")
-    AddTextComponentString("SENTEX v3.7 | SECURITY TEST")
-    DrawText(x, y - 0.010)
-end
-
 -- Dibujo de cada ítem (ahora con soporte para toggle)
 local function DrawItem(x, yCenter, w, opt, isSelected)
     local sepX = x - w / 2 + 0.02
     DrawRect(sepX, yCenter, 0.001, 0.03, _G.MenuSeparatorColor[1], _G.MenuSeparatorColor[2], _G.MenuSeparatorColor[3], _G.MenuSeparatorColor[4])
     
-    -- Limpiar nombre
     local cleanText = opt.nombre:gsub("[%[»%]•]", ""):gsub("^%s*", "")
     
-    -- Mostrar texto de la opción
     SetTextFont(0)
     SetTextScale(0.4, 0.4)
     SetTextColour(255, 255, 255, 255)
@@ -81,14 +123,8 @@ local function DrawItem(x, yCenter, w, opt, isSelected)
     AddTextComponentString(cleanText)
     DrawText(x - w / 2 + 0.04, yCenter - 0.0125)
     
-    -- Mostrar indicador si es toggle
-    local rightText = ""
     if opt.toggle then
-        if opt.toggleValue then
-            rightText = "✔️ ON"
-        else
-            rightText = "❌ OFF"
-        end
+        local rightText = opt.toggleValue and "✔️ ON" or "❌ OFF"
         SetTextFont(0)
         SetTextScale(0.35, 0.35)
         SetTextColour(200, 200, 200, 200)
@@ -96,10 +132,7 @@ local function DrawItem(x, yCenter, w, opt, isSelected)
         SetTextEntry("STRING")
         AddTextComponentString(rightText)
         DrawText(x + w / 2 - 0.09, yCenter - 0.0125)
-    end
-    
-    -- Flecha si tiene submenú o acción normal
-    if not opt.toggle then
+    else
         SetTextFont(0)
         SetTextScale(0.45, 0.45)
         SetTextColour(200, 200, 200, 200)
@@ -232,7 +265,7 @@ Citizen.CreateThread(function()
                             _G.MenuOption = 1
                             _G.MenuScroll = 0
                         elseif sel.toggle then
-                            -- Alternar el valor
+                            -- Alternar el valor y ejecutar la función asociada
                             sel.toggleValue = not sel.toggleValue
                             if sel.onToggle then
                                 sel.onToggle(sel.toggleValue)
@@ -269,7 +302,7 @@ RegisterMenuModule("main", {
     {nombre="[»] Cargando módulos...", accion=nil, desc="Espera a que terminen las descargas"}
 })
 
-Notify("~b~[SENTEX] Core mejorado cargado (banner con imagen y toggles).")
+Notify("~b~[SENTEX] Core mejorado cargado (banner desde URL).")
 
 -- Tecla PAGEDOWN
 Citizen.CreateThread(function()

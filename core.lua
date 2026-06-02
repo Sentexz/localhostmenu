@@ -1,5 +1,5 @@
 --[[
-    SENTEX CORE v3.7 - Banner con carga bloqueante (para Susano)
+    SENTEX CORE v3.7 - Banner robusto con DUI
 ]]
 
 _G.MenuModules = {}
@@ -23,7 +23,7 @@ function Notify(msg)
 end
 
 -- ============================================================================
---                    BANNER CON DUI (carga bloqueante)
+--                    BANNER CON DUI (VERSIÓN ROBUSTA)
 -- ============================================================================
 local BANNER_URL = "https://i.imgur.com/jnKfAh1.png"
 local runtimeTxd = nil
@@ -35,14 +35,14 @@ local function loadBannerFromURL()
     
     local duiObj = CreateDui(BANNER_URL, 512, 128)
     if not duiObj then
-        print("[SENTEX] Error al crear DUI")
+        print("[SENTEX] Error: No se pudo crear el objeto DUI.")
         return false
     end
     
-    -- Esperar hasta obtener el handle (máx 8 segundos)
+    -- Esperar a que el DUI esté listo (máximo 5 segundos)
     local duiHandle = 0
     local attempts = 0
-    while attempts < 80 and duiHandle == 0 do
+    while attempts < 50 and duiHandle == 0 do
         duiHandle = GetDuiHandle(duiObj)
         if duiHandle == 0 then
             Citizen.Wait(100)
@@ -51,70 +51,74 @@ local function loadBannerFromURL()
     end
     
     if duiHandle == 0 then
-        print("[SENTEX] Timeout obteniendo handle DUI")
+        print("[SENTEX] Error: No se pudo obtener el handle del DUI.")
         return false
     end
     
+    -- Crear el diccionario de texturas temporal
     runtimeTxd = CreateRuntimeTxd('sentex_banner_txd')
     if not runtimeTxd then
-        print("[SENTEX] Error al crear runtime TXD")
+        print("[SENTEX] Error: No se pudo crear el diccionario de texturas (TXD).")
         return false
     end
     
+    -- Crear la textura desde el handle del DUI
     local texture = CreateRuntimeTextureFromDuiHandle(runtimeTxd, 'banner_texture', duiHandle)
     if not texture then
-        print("[SENTEX] Error al crear textura runtime")
+        print("[SENTEX] Error: No se pudo crear la textura desde el DUI.")
         return false
     end
     
-    textureLoaded = true
-    print("[SENTEX] Banner cargado correctamente")
+    print("[SENTEX] Banner cargado correctamente.")
     return true
 end
 
--- Carga síncrona (bloquea el menú hasta que esté listo o falle)
 local function waitForBanner()
-    -- Primer intento
+    -- Intento 1
     if loadBannerFromURL() then
+        textureLoaded = true
         bannerReady = true
         return
     end
     
-    -- Reintento tras 2 segundos
     print("[SENTEX] Reintentando carga del banner...")
-    Citizen.Wait(2000)
+    Citizen.Wait(2000) -- Esperar 2 segundos
+    
+    -- Intento 2
     if loadBannerFromURL() then
+        textureLoaded = true
         bannerReady = true
         return
     end
     
-    -- Segundo reintento tras 3 segundos más
     print("[SENTEX] Último reintento...")
-    Citizen.Wait(3000)
+    Citizen.Wait(3000) -- Esperar 3 segundos más
+    
+    -- Intento 3
     if loadBannerFromURL() then
+        textureLoaded = true
         bannerReady = true
         return
     end
     
-    -- Si todo falla, usamos fallback
-    print("[SENTEX] No se pudo cargar el banner, usando fallback")
-    bannerReady = true  -- Para que el menú se pueda abrir igual
+    -- Si todo falla, usar modo seguro con texto
+    print("[SENTEX] No se pudo cargar la imagen. Usando banner de texto.")
+    bannerReady = true
     textureLoaded = false
 end
 
--- Esperar a que el banner esté listo antes de activar el menú
 Citizen.CreateThread(function()
     print("[SENTEX] Inicializando banner...")
     waitForBanner()
-    print("[SENTEX] Banner listo. Ya puedes abrir el menú con PAGEDOWN.")
+    print("[SENTEX] Banner listo.")
 end)
 
--- Dibujo del banner (con fallback)
 local function DrawBanner(x, y, w, h)
     if textureLoaded and runtimeTxd then
+        -- Dibujar el banner con la textura cargada de la URL
         DrawSprite(runtimeTxd, 'banner_texture', x, y, w, h, 0.0, 255, 255, 255, 255)
     else
-        -- Fallback elegante
+        -- Fallback: Banner de texto elegante
         DrawRect(x, y, w, h, 225, 17, 79, 255)
         SetTextFont(1)
         SetTextScale(0.48, 0.48)
@@ -127,7 +131,7 @@ local function DrawBanner(x, y, w, h)
 end
 
 -- ============================================================================
---                    NAVEGACIÓN Y DIBUJO (igual que antes)
+--                    NAVEGACIÓN Y DIBUJO (Resto del código)
 -- ============================================================================
 local function UpdateScroll(totalOpts)
     if totalOpts <= _G.MenuMaxVisible then
@@ -267,7 +271,6 @@ function DrawMenu()
     end
 end
 
--- Bucle de navegación
 Citizen.CreateThread(function()
     while true do
         Citizen.Wait(0)
@@ -320,20 +323,19 @@ function RegisterMenuModule(name, options)
     _G.MenuModules[name] = options
 end
 
--- Menú de carga mientras el banner no está listo
 RegisterMenuModule("main", {
-    {nombre="[»] Cargando banner...", accion=nil, desc="Espera unos segundos antes de abrir el menú"}
+    {nombre="[»] Cargando módulos...", accion=nil, desc="Espera a que terminen las descargas"}
 })
 
-Notify("~b~[SENTEX] Core con banner bloqueante cargado.")
+Notify("~b~[SENTEX] Core cargado (banner DUI).")
 
--- Tecla PAGEDOWN (solo permite abrir si bannerReady = true)
+-- Tecla PAGEDOWN
 Citizen.CreateThread(function()
     while true do
         Citizen.Wait(0)
         if IsDisabledControlJustReleased(0, 11) then
             if not bannerReady then
-                Notify("~r~El menú aún no está listo. Espera a que cargue el banner.")
+                Notify("~r~Menú inicializando. Espera unos segundos.")
             else
                 _G.MenuVisible = not _G.MenuVisible
                 if _G.MenuVisible then

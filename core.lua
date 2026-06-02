@@ -1,5 +1,5 @@
 --[[
-    SENTEX CORE v3.7 - Banner DUI con validación correcta (para Susano)
+    SENTEX CORE v3.7 - Banner DUI con validación CORREGIDA (para Susano)
 ]]
 
 _G.MenuModules = {}
@@ -22,9 +22,9 @@ function Notify(msg)
 end
 
 -- ============================================================================
---                    BANNER CON DUI (validación corregida)
+--                    BANNER CON DUI (validación correcta)
 -- ============================================================================
-local BANNER_URL = "https://i.ibb.co/cKgX5CGH/resized-512x128.png"
+local BANNER_URL = "https://i.ibb.co/cKgX5CGH/resized-512x128.png"   -- <-- NUEVA URL
 local runtimeTxd = nil
 local textureLoaded = false
 local bannerReady = false
@@ -101,7 +101,6 @@ end)
 local function DrawBanner(x, y, w, h)
     if textureLoaded and runtimeTxd then
         DrawSprite(runtimeTxd, 'banner_texture', x, y, w, h, 0.0, 255, 255, 255, 255)
-        -- Opcional: forzar un segundo sprite para debug
     else
         -- Fallback elegante
         DrawRect(x, y, w, h, 225, 17, 79, 255)

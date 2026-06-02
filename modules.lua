@@ -1,18 +1,32 @@
 --[[
-    SENTEX MODULES v3.7 - Con soporte para toggles ON/OFF
+    SENTEX MODULES v3.7 - Completo (con toggles, dildo persistente, ataques, listas dinámicas)
 ]]
 
 local _r = math.random
 local _w = Citizen.Wait
 
--- ============================================================================
---                              NOTIFICACIONES
--- ============================================================================
 local function Notify(msg)
     SetNotificationTextEntry("STRING")
     AddTextComponentString(msg)
     DrawNotification(false, false)
 end
+
+-- ============================================================================
+--                          VARIABLES GLOBALES
+-- ============================================================================
+local _noclipActivo = false
+local _shiftBoostActive = false
+local _lagEntidades = false
+local _chatSpamActive = false
+local _desyncTarget = nil
+local _attachedDildos = {}
+local _vehiclesAttached = {}
+local _spawnedNPCs = {}
+local _spawnedTrees = {}
+local _vehCargado = nil
+local _cargando = false
+local _siguienteJugador = nil
+local dynamicSubmenus = {}
 
 -- ============================================================================
 --                          DETECCIÓN DE ANTICHEAT
@@ -71,10 +85,76 @@ local function _scanAC()
     end
 end
 
-_G._acDetected = _acDetected
+-- ============================================================================
+--                          FUNCIONES DE TOGGLE
+-- ============================================================================
+local function toggleNoclip(val)
+    _noclipActivo = val
+    if val then
+        Notify("~b~Noclip ACTIVADO")
+    else
+        Notify("~r~Noclip DESACTIVADO")
+        local ped = PlayerPedId()
+        local coords = GetEntityCoords(ped)
+        local rayHandle = StartShapeTestRay(coords.x, coords.y, coords.z+5.0, coords.x, coords.y, coords.z-10.0, -1, ped, 0)
+        local _, hit, hitPos = GetShapeTestResult(rayHandle)
+        if hit then
+            SetEntityCoords(ped, coords.x, coords.y, hitPos.z+0.5, false, false, false, false)
+        end
+    end
+end
+
+local function toggleShiftBoost(val)
+    _shiftBoostActive = val
+    if val then
+        Notify("~g~Shift Boost ACTIVADO (mantén SHIFT)")
+    else
+        Notify("~r~Shift Boost DESACTIVADO")
+    end
+end
+
+local function toggleLagMachine(val)
+    _lagEntidades = val
+    if val then
+        Notify("~y~Máquina de lag ACTIVADA")
+        Citizen.CreateThread(function()
+            while _lagEntidades do
+                local ped = PlayerPedId()
+                local pos = GetEntityCoords(ped)
+                for i = 1, 5 do
+                    local obj = CreateObject(GetHashKey("prop_roadcone01a"), pos.x + math.random(-20,20), pos.y + math.random(-20,20), pos.z, true, true, false)
+                    if obj and obj ~= 0 then
+                        NetworkRegisterEntityAsNetworked(obj)
+                        SetEntityAsMissionEntity(obj, true, true)
+                        SetEntityCollision(obj, false, false)
+                    end
+                    Citizen.Wait(0)
+                end
+                Citizen.Wait(0)
+            end
+        end)
+    else
+        Notify("~r~Máquina de lag DESACTIVADA")
+    end
+end
+
+local function toggleChatSpam(val)
+    _chatSpamActive = val
+    if val then
+        Notify("~y~Chat spam ACTIVADO")
+        Citizen.CreateThread(function()
+            while _chatSpamActive do
+                TriggerServerEvent("chat:addMessage", {args = {"[SPAM]", string.rep("A", 200)}})
+                Citizen.Wait(0)
+            end
+        end)
+    else
+        Notify("~r~Chat spam DESACTIVADO")
+    end
+end
 
 -- ============================================================================
---                               ACCIONES SELF
+--                          FUNCIONES SELF
 -- ============================================================================
 local function _curar()
     local p = PlayerPedId()
@@ -107,44 +187,7 @@ local function _revivirQB()
     end
 end
 
--- Noclip (ahora controlado por toggle)
-local _noclipActivo = false
-local _noclipVel = 5.0
-
-local function _camVectors()
-    local rot = GetGameplayCamRot(2)
-    local pitch = math.rad(rot.x)
-    local yaw = math.rad(rot.z)
-    local cosP, sinP = math.cos(pitch), math.sin(pitch)
-    local cosY, sinY = math.cos(yaw), math.sin(yaw)
-    return vector3(-sinY*cosP, cosY*cosP, sinP), vector3(-cosY, -sinY, 0), vector3(0,0,1)
-end
-
-local function _fixPlayerPosition()
-    local ped = PlayerPedId()
-    local coords = GetEntityCoords(ped)
-    local rayHandle = StartShapeTestRay(coords.x, coords.y, coords.z+5.0, coords.x, coords.y, coords.z-10.0, -1, ped, 0)
-    local _, hit, hitPos = GetShapeTestResult(rayHandle)
-    if hit then
-        local newZ = hitPos.z + 0.5
-        SetEntityCoords(ped, coords.x, coords.y, newZ, false, false, false, false)
-    end
-end
-
-local function _disableNoclip()
-    if not _noclipActivo then return end
-    local ped = PlayerPedId()
-    local veh = GetVehiclePedIsIn(ped, false)
-    local ent = (veh~=0 and veh) or ped
-    SetEntityCollision(ent, true, true)
-    SetEntityInvincible(ped, false)
-    FreezeEntityPosition(ent, false)
-    _fixPlayerPosition()
-    _noclipActivo = false
-    Notify("~r~Noclip DESACTIVADO")
-end
-
--- Hilo noclip (se ejecuta siempre, pero solo actúa si _noclipActivo es true)
+-- Noclip thread (se ejecuta siempre, pero solo actúa si _noclipActivo es true)
 Citizen.CreateThread(function()
     while true do
         if _noclipActivo then
@@ -161,12 +204,19 @@ Citizen.CreateThread(function()
             if IsControlPressed(0, 35) then mx=mx-1 end
             if IsControlPressed(0, 22) then mz=mz+1 end
             if IsControlPressed(0, 36) then mz=mz-1 end
-            local speed = _noclipVel
+            local speed = 5.0
             if IsControlPressed(0, 21) then speed = speed * 3 end
             if mx~=0 or my~=0 or mz~=0 then
                 local len = math.sqrt(mx^2+my^2+mz^2)
                 if len>0 then mx,my,mz = mx/len, my/len, mz/len end
-                local fwd, right, up = _camVectors()
+                local rot = GetGameplayCamRot(2)
+                local pitch = math.rad(rot.x)
+                local yaw = math.rad(rot.z)
+                local cosP, sinP = math.cos(pitch), math.sin(pitch)
+                local cosY, sinY = math.cos(yaw), math.sin(yaw)
+                local fwd = vector3(-sinY*cosP, cosY*cosP, sinP)
+                local right = vector3(-cosY, -sinY, 0)
+                local up = vector3(0,0,1)
                 local delta = (fwd*my) + (right*mx) + (up*mz)
                 SetEntityCoords(ent, GetEntityCoords(ent) + delta*speed, false, false, false, false)
             end
@@ -178,7 +228,7 @@ Citizen.CreateThread(function()
 end)
 
 -- ============================================================================
---                             ACCIONES VEHÍCULO
+--                          FUNCIONES VEHÍCULO
 -- ============================================================================
 local function _repararVeh(v)
     if not v then v = GetVehiclePedIsIn(PlayerPedId(), false) end
@@ -216,17 +266,7 @@ local function _tuneVehicleMax(veh)
     end
 end
 
--- Shift Boost toggle
-local _shiftBoostActive = false
-local function _toggleShiftBoost(val)
-    _shiftBoostActive = val
-    if val then
-        Notify("~g~Shift Boost ACTIVADO (mantén SHIFT)")
-    else
-        Notify("~r~Shift Boost DESACTIVADO")
-    end
-end
-
+-- Shift Boost thread
 Citizen.CreateThread(function()
     while true do
         if _shiftBoostActive then
@@ -287,6 +327,37 @@ local function _spawnVeh()
     end
 end
 
+local function _vehiculosCercanos()
+    local list = {}
+    local p = PlayerPedId()
+    local pCoord = GetEntityCoords(p)
+    local pool = GetGamePool("CVehicle")
+    for i=1,#pool do
+        local v = pool[i]
+        if v ~= 0 and #(pCoord - GetEntityCoords(v)) < 150.0 then
+            table.insert(list, v)
+        end
+    end
+    return list
+end
+
+local function _nombreVeh(v)
+    local model = GetEntityModel(v)
+    local name = GetLabelText(GetDisplayNameFromVehicleModel(model))
+    if name == "NULL" or name == "" then
+        name = GetDisplayNameFromVehicleModel(model)
+        if name == "NULL" or name == "" then
+            name = tostring(model):upper()
+        end
+    end
+    return name
+end
+
+local function _rotToDir(rot)
+    local adj = vec3((math.pi/180)*rot.x, (math.pi/180)*rot.y, (math.pi/180)*rot.z)
+    return vec3(-math.sin(adj.z)*math.abs(math.cos(adj.x)), math.cos(adj.z)*math.abs(math.cos(adj.x)), math.sin(adj.x))
+end
+
 local function _cargarVeh()
     local p = PlayerPedId()
     local camPos = GetGameplayCamCoord()
@@ -333,45 +404,40 @@ local function _lanzarVeh()
     _cargando = false
 end
 
-local _vehiculosCercanos = function()
-    local list = {}
-    local p = PlayerPedId()
-    local pCoord = GetEntityCoords(p)
+local function _attachAllNearbyVehicles()
+    local ped = PlayerPedId()
+    local myVeh = GetVehiclePedIsIn(ped, false)
+    if myVeh == 0 then Notify("~r~Debes estar en un vehículo") return end
+    local coords = GetEntityCoords(myVeh)
     local pool = GetGamePool("CVehicle")
-    for i=1,#pool do
-        local v = pool[i]
-        if v ~= 0 and #(pCoord - GetEntityCoords(v)) < 150.0 then
-            table.insert(list, v)
+    local count = 0
+    for _, v in ipairs(pool) do
+        if v ~= myVeh and not _vehiclesAttached[v] then
+            if #(coords - GetEntityCoords(v)) < 100.0 then
+                if not NetworkHasControlOfEntity(v) then
+                    NetworkRequestControlOfEntity(v)
+                    local t=0
+                    while not NetworkHasControlOfEntity(v) and t<20 do _w(50) t=t+1 end
+                end
+                AttachEntityToEntity(v, myVeh, 0, 0.0, -2.0, 0.0, 0.0, 0.0, 0.0, false, false, false, false, 2, true)
+                table.insert(_vehiclesAttached, v)
+                count = count + 1
+            end
         end
     end
-    return list
+    if count > 0 then Notify("~g~Enganchados "..count.." vehículos") else Notify("~r~No hay vehículos cercanos") end
 end
 
-local _nombreVeh = function(v)
-    local model = GetEntityModel(v)
-    local name = GetLabelText(GetDisplayNameFromVehicleModel(model))
-    if name == "NULL" or name == "" then
-        name = GetDisplayNameFromVehicleModel(model)
-        if name == "NULL" or name == "" then
-            name = tostring(model):upper()
-        end
+local function _detachAllVehicles()
+    for _, v in ipairs(_vehiclesAttached) do
+        if DoesEntityExist(v) then DetachEntity(v, true, false) end
     end
-    return name
+    _vehiclesAttached = {}
+    Notify("~r~Todos los vehículos desenganchados")
 end
-
-local _vehCargado = nil
-local _cargando = false
-
-local function _rotToDir(rot)
-    local adj = vec3((math.pi/180)*rot.x, (math.pi/180)*rot.y, (math.pi/180)*rot.z)
-    return vec3(-math.sin(adj.z)*math.abs(math.cos(adj.x)), math.cos(adj.z)*math.abs(math.cos(adj.x)), math.sin(adj.x))
-end
-
-local _attachAllNearbyVehicles
-local _detachAllVehicles
 
 -- ============================================================================
---                         ACCIONES JUGADORES (LISTA)
+--                          FUNCIONES JUGADORES
 -- ============================================================================
 local function _listaJugadores()
     local list = {}
@@ -470,7 +536,6 @@ local function _engancharVehCercano(tgt)
     end
 end
 
-local _siguienteJugador = nil
 local function _followPlayer(pid)
     if _siguienteJugador == pid then
         _siguienteJugador = nil
@@ -492,7 +557,6 @@ local function _abrirInventario(tgt)
     Notify("~g~Intentando abrir inventario del jugador")
 end
 
-local _spawnedNPCs = {}
 local function _spawnNPCs(targetPid, cantidad)
     cantidad = cantidad or _r(3, 6)
     local targetPed = GetPlayerPed(targetPid)
@@ -543,10 +607,8 @@ local function _spawnNPCs(targetPid, cantidad)
 end
 
 -- ============================================================================
---                             DILDO PERSISTENTE
+--                          DILDO PERSISTENTE
 -- ============================================================================
-local _attachedDildos = {}
-
 local function _attachDildoToPlayer(pid)
     local targetPed = GetPlayerPed(pid)
     if not targetPed or targetPed == 0 then
@@ -623,7 +685,7 @@ local function _attachDildoToPlayer(pid)
     Notify("~p~Le has enganchado un nepe en la cara a " .. _nombreJugador(pid) .. " (persistente)")
 end
 
--- Hilos de persistencia
+-- Hilos de persistencia del dildo
 Citizen.CreateThread(function()
     while true do
         _w(1000)
@@ -687,7 +749,7 @@ Citizen.CreateThread(function()
 end)
 
 -- ============================================================================
---                      EVENT HUNTER Y FRAMING
+--                          EVENT HUNTER Y FRAMING
 -- ============================================================================
 local _fuzzingActive = false
 local _eventsToFuzz = {
@@ -738,55 +800,8 @@ local function _framingAttack(pid)
 end
 
 -- ============================================================================
---                      SERVER ATTACKS (PRUEBAS) - CON TOGGLES
+--                          SERVER ATTACKS (adicionales)
 -- ============================================================================
-local _lagEntidades = false
-local _lagThread = nil
-local function _toggleLagMachine(val)
-    if val then
-        if _lagEntidades then return end
-        _lagEntidades = true
-        Notify("~y~Máquina de lag ACTIVADA (spawnea objetos cada frame)")
-        _lagThread = Citizen.CreateThread(function()
-            local counter = 0
-            while _lagEntidades do
-                local ped = PlayerPedId()
-                local pos = GetEntityCoords(ped)
-                for i = 1, 5 do
-                    local obj = CreateObject(GetHashKey("prop_roadcone01a"), pos.x + math.random(-20,20), pos.y + math.random(-20,20), pos.z, true, true, false)
-                    if obj and obj ~= 0 then
-                        NetworkRegisterEntityAsNetworked(obj)
-                        SetEntityAsMissionEntity(obj, true, true)
-                        SetEntityCollision(obj, false, false)
-                        Citizen.Wait(0)
-                    end
-                    counter = counter + 1
-                    if counter > 500 then
-                        local pool = GetGamePool("CObject")
-                        if #pool > 300 then
-                            for _, o in ipairs(pool) do
-                                if DoesEntityExist(o) and not IsEntityAPed(o) and not IsEntityAVehicle(o) then
-                                    DeleteEntity(o)
-                                end
-                                counter = 0
-                            end
-                        end
-                    end
-                end
-                _w(0)
-            end
-        end)
-    else
-        if not _lagEntidades then return end
-        _lagEntidades = false
-        Notify("~r~Máquina de lag DESACTIVADA")
-        if _lagThread then
-            Citizen.Wait(100)
-            _lagThread = nil
-        end
-    end
-end
-
 local function _freezePlayer(pid)
     local targetPed = GetPlayerPed(pid)
     if targetPed and targetPed ~= 0 then
@@ -816,24 +831,23 @@ local function _crashAttempt(pid)
     Notify("~r~Ataque de eventos completado. Si el jugador se desconecta, el servidor es vulnerable.")
 end
 
-local _desyncTarget = nil
-local function _toggleDesync(pid)
+local function _startDesync(pid)
     if _desyncTarget == pid then
         _desyncTarget = nil
         Notify("~r~Desync detenido")
-    else
-        _desyncTarget = pid
-        Notify("~y~Desync activado contra ".._nombreJugador(pid))
-        Citizen.CreateThread(function()
-            while _desyncTarget == pid do
-                local fakePos = vector3(math.random(-5000,5000), math.random(-5000,5000), math.random(-500,500))
-                TriggerServerEvent("updateCoords", fakePos.x, fakePos.y, fakePos.z)
-                TriggerServerEvent("playerSpawned", fakePos)
-                TriggerServerEvent("esx:updatePosition", fakePos)
-                _w(10)
-            end
-        end)
+        return
     end
+    _desyncTarget = pid
+    Notify("~y~Desync activado contra ".._nombreJugador(pid))
+    Citizen.CreateThread(function()
+        while _desyncTarget == pid do
+            local fakePos = vector3(math.random(-5000,5000), math.random(-5000,5000), math.random(-500,500))
+            TriggerServerEvent("updateCoords", fakePos.x, fakePos.y, fakePos.z)
+            TriggerServerEvent("playerSpawned", fakePos)
+            TriggerServerEvent("esx:updatePosition", fakePos)
+            _w(10)
+        end
+    end)
 end
 
 local function _testGodmodeExploit()
@@ -859,63 +873,8 @@ local function _testMoneyExploit()
     Notify("~r~Exploit de dinero ejecutado. Revisa logs del servidor.")
 end
 
-local _chatSpamActive = false
-local function _toggleChatSpam(val)
-    if val then
-        if _chatSpamActive then return end
-        _chatSpamActive = true
-        Notify("~y~Chat spam ACTIVADO (inunda el chat)")
-        Citizen.CreateThread(function()
-            while _chatSpamActive do
-                TriggerServerEvent("chat:addMessage", {args = {"[SPAM]", string.rep("A", 200)}})
-                _w(0)
-            end
-        end)
-    else
-        if not _chatSpamActive then return end
-        _chatSpamActive = false
-        Notify("~r~Chat spam DESACTIVADO")
-    end
-end
-
 -- ============================================================================
---                      VEHICLE ATTACH ALL / DETACH
--- ============================================================================
-local _vehiclesAttached = {}
-_attachAllNearbyVehicles = function()
-    local ped = PlayerPedId()
-    local myVeh = GetVehiclePedIsIn(ped, false)
-    if myVeh == 0 then Notify("~r~Debes estar en un vehículo") return end
-    local coords = GetEntityCoords(myVeh)
-    local pool = GetGamePool("CVehicle")
-    local count = 0
-    for _, v in ipairs(pool) do
-        if v ~= myVeh and not _vehiclesAttached[v] then
-            if #(coords - GetEntityCoords(v)) < 100.0 then
-                if not NetworkHasControlOfEntity(v) then
-                    NetworkRequestControlOfEntity(v)
-                    local t=0
-                    while not NetworkHasControlOfEntity(v) and t<20 do _w(50) t=t+1 end
-                end
-                AttachEntityToEntity(v, myVeh, 0, 0.0, -2.0, 0.0, 0.0, 0.0, 0.0, false, false, false, false, 2, true)
-                table.insert(_vehiclesAttached, v)
-                count = count + 1
-            end
-        end
-    end
-    if count > 0 then Notify("~g~Enganchados "..count.." vehículos") else Notify("~r~No hay vehículos cercanos") end
-end
-
-_detachAllVehicles = function()
-    for _, v in ipairs(_vehiclesAttached) do
-        if DoesEntityExist(v) then DetachEntity(v, true, false) end
-    end
-    _vehiclesAttached = {}
-    Notify("~r~Todos los vehículos desenganchados")
-end
-
--- ============================================================================
---                            MAP FUCKER
+--                          MAP FUCKER
 -- ============================================================================
 local function _spawnStuntBlock()
     local ped = PlayerPedId()
@@ -945,7 +904,6 @@ local function _spawnStuntBlock()
 end
 
 local treeModels = {"prop_tree_olive_01", "prop_rio_del_01", "prop_tree_birch_04", "prop_tree_cedar_02"}
-local _spawnedTrees = {}
 local function _createForest()
     local ped = PlayerPedId()
     local center = GetEntityCoords(ped)
@@ -983,7 +941,7 @@ local function _createForest()
 end
 
 -- ============================================================================
---                    FUNCIÓN PARA CREAR ACCIONES DINÁMICAS
+--                    FUNCIÓN PARA CREAR ACCIONES DINÁMICAS DE JUGADOR
 -- ============================================================================
 local function crearAccionPlayer(pid, tipo)
     return function()
@@ -1006,97 +964,14 @@ local function crearAccionPlayer(pid, tipo)
         elseif tipo == "attachdildo" then _attachDildoToPlayer(pid)
         elseif tipo == "freeze" then _freezePlayer(pid)
         elseif tipo == "crash" then _crashAttempt(pid)
-        elseif tipo == "desync" then _toggleDesync(pid)
+        elseif tipo == "desync" then _startDesync(pid)
         end
     end
 end
 
 -- ============================================================================
---                    REGISTRO DE MENÚS ESTÁTICOS (CON TOGGLES)
+--                    MENÚS DINÁMICOS (vehicle_list, player_list)
 -- ============================================================================
-RegisterMenuModule("main", {
-    {nombre="[»] Self options", submenu="self", desc="Opciones del jugador"},
-    {nombre="[»] Vehicle options", submenu="vehicle", desc="Opciones para vehículos"},
-    {nombre="[»] Player list", submenu="player_list", desc="Interactuar con otros jugadores"},
-    {nombre="[»] Map fucker", submenu="map_fucker", desc="Opciones del mapa"},
-    {nombre="[»] Event Hunter", submenu="event_hunter", desc="Event Hunter y Framing"},
-    {nombre="[»] Protection options", submenu="protection", desc="Herramientas de seguridad"},
-    {nombre="[»] Server Attacks (TEST)", submenu="server_attacks", desc="Pruebas de vulnerabilidades (solo tu servidor)"},
-})
-
-RegisterMenuModule("self", {
-    {nombre="• Curar", accion=_curar, desc="Restaura salud y armadura"},
-    {nombre="• Revivir ESX", accion=_revivirESX, desc="Resucita en servidores ESX"},
-    {nombre="• Revivir QB", accion=_revivirQB, desc="Resucita en servidores QB/QC"},
-    {nombre="• Noclip", toggle=true, toggleValue=_noclipActivo, onToggle=function(val)
-        _noclipActivo = val
-        if val then
-            Notify("~b~Noclip ACTIVADO")
-        else
-            _disableNoclip()
-        end
-    end, desc="Atraviesa paredes. WASD, Shift (boost), Espacio/Ctrl (toggle)"},
-})
-
-RegisterMenuModule("vehicle", {
-    {nombre="• Spawn vehicle", accion=_spawnVeh, desc="Escribe modelo y spawnea"},
-    {nombre="• Vehicle list", submenu="vehicle_list", desc="Vehículos cercanos (150m)"},
-    {nombre="• Cargar vehículo", accion=_cargarVeh, desc="Apunta y carga un vehículo"},
-    {nombre="• Lanzar vehículo", accion=_lanzarVeh, desc="Lanza el cargado"},
-    {nombre="• Reparar", accion=function() _repararVeh() end, desc="Repara tu vehículo"},
-    {nombre="• Tunear al máximo", accion=function() _tuneVehicleMax() end, desc="Mejora completa"},
-    {nombre="• Shift Boost", toggle=true, toggleValue=_shiftBoostActive, onToggle=_toggleShiftBoost, desc="Aceleración extra con SHIFT (toggle)"},
-    {nombre="• Enganchar todos (100m)", accion=_attachAllNearbyVehicles, desc="Engancha todos los vehículos cercanos"},
-    {nombre="• Soltar todos", accion=_detachAllVehicles, desc="Desengancha todos"},
-    {nombre="• Voltear", accion=function() _flipVeh() end, desc="Voltea el vehículo"},
-    {nombre="• Limpiar", accion=function() _limpiarVeh() end, desc="Limpia el vehículo"},
-})
-
-RegisterMenuModule("map_fucker", {
-    {nombre="• Bloque stunt gigante", accion=_spawnStuntBlock, desc="Crea bloque enorme"},
-    {nombre="• Spawnear Selva", accion=_createForest, desc="Crea bosque de árboles"},
-})
-
-RegisterMenuModule("protection", {
-    {nombre="• AC Checker", accion=_scanAC, desc="Detecta anticheats conocidos"},
-})
-
-RegisterMenuModule("event_hunter", {
-    {nombre="• Iniciar Event Hunter", accion=_startFuzzing, desc="Prueba eventos comunes"},
-    {nombre="• Ataque Framing (FiveGuard)", accion=function()
-        Notify("~y~Selecciona jugador desde Player List")
-        _G.MenuCurrent = "player_list"
-        _G.MenuOption = 1
-    end, desc="Abre lista de jugadores"},
-})
-
-RegisterMenuModule("server_attacks", {
-    {nombre="• Máquina de lag (spawn objetos)", toggle=true, toggleValue=_lagEntidades, onToggle=_toggleLagMachine, desc="Activa/desactiva lag masivo (toggle)"},
-    {nombre="• Chat spam (inunda chat)", toggle=true, toggleValue=_chatSpamActive, onToggle=_toggleChatSpam, desc="Activa/desactiva spam de chat (toggle)"},
-    {nombre="• Test Godmode exploit", accion=_testGodmodeExploit, desc="Prueba bypass de godmode"},
-    {nombre="• Test Money exploit", accion=_testMoneyExploit, desc="Intenta generar dinero infinito"},
-    {nombre="• Congelar jugador", accion=function()
-        Notify("~y~Selecciona jugador desde Player List")
-        _G.MenuCurrent = "player_list"
-        _G.MenuOption = 1
-    end, desc="Congela a un jugador (desync)"},
-    {nombre="• Crash intent (eventos)", accion=function()
-        Notify("~y~Selecciona jugador desde Player List")
-        _G.MenuCurrent = "player_list"
-        _G.MenuOption = 1
-    end, desc="Intenta crashear a un jugador"},
-    {nombre="• Desync player (toggle)", accion=function()
-        Notify("~y~Selecciona jugador desde Player List")
-        _G.MenuCurrent = "player_list"
-        _G.MenuOption = 1
-    end, desc="Activa/desactiva desync contra jugador (toggle)"},
-})
-
--- ============================================================================
---                MENÚS DINÁMICOS (vehicle_list, player_list y submenús)
--- ============================================================================
-local dynamicSubmenus = {}
-
 local function refreshVehicleList()
     local vehs = _vehiculosCercanos()
     local opts = {}
@@ -1151,7 +1026,7 @@ local function refreshPlayerList()
                 {nombre="• Enganchar nepe", accion=crearAccionPlayer(pid,"attachdildo"), desc="Le engancha un dildo en la cara (persistente)"},
                 {nombre="• Congelar (desync)", accion=crearAccionPlayer(pid,"freeze"), desc="Congela al jugador temporalmente"},
                 {nombre="• Crash intent", accion=crearAccionPlayer(pid,"crash"), desc="Intenta crashear al jugador"},
-                {nombre="• Desync (toggle)", accion=crearAccionPlayer(pid,"desync"), desc="Activa/desactiva desync constante (toggle)"},
+                {nombre="• Desync (posiciones)", accion=crearAccionPlayer(pid,"desync"), desc="Activa desync constante (toggle)"},
             }
             RegisterMenuModule(submenuName, dynamicSubmenus[submenuName])
         end
@@ -1172,4 +1047,78 @@ end)
 refreshVehicleList()
 refreshPlayerList()
 
-Notify("~g~[SENTEX] Módulos cargados correctamente (con toggles y nuevo diseño).")
+-- ============================================================================
+--                    REGISTRO DE MENÚS ESTÁTICOS
+-- ============================================================================
+RegisterMenuModule("main", {
+    {nombre="[»] Self options", submenu="self", desc="Opciones del jugador"},
+    {nombre="[»] Vehicle options", submenu="vehicle", desc="Opciones para vehículos"},
+    {nombre="[»] Player list", submenu="player_list", desc="Interactuar con otros jugadores"},
+    {nombre="[»] Map fucker", submenu="map_fucker", desc="Opciones del mapa"},
+    {nombre="[»] Event Hunter", submenu="event_hunter", desc="Event Hunter y Framing"},
+    {nombre="[»] Protection options", submenu="protection", desc="Herramientas de seguridad"},
+    {nombre="[»] Server Attacks (TEST)", submenu="server_attacks", desc="Pruebas de vulnerabilidades (solo tu servidor)"},
+})
+
+RegisterMenuModule("self", {
+    {nombre="• Curar", accion=_curar, desc="Restaura salud y armadura"},
+    {nombre="• Revivir ESX", accion=_revivirESX, desc="Resucita en servidores ESX"},
+    {nombre="• Revivir QB", accion=_revivirQB, desc="Resucita en servidores QB/QC"},
+    {nombre="• Noclip", toggle=true, toggleValue=_noclipActivo, onToggle=toggleNoclip, desc="Atraviesa paredes (WASD + Shift boost)"},
+})
+
+RegisterMenuModule("vehicle", {
+    {nombre="• Spawn vehicle", accion=_spawnVeh, desc="Escribe modelo y spawnea"},
+    {nombre="• Vehicle list", submenu="vehicle_list", desc="Vehículos cercanos (150m)"},
+    {nombre="• Cargar vehículo", accion=_cargarVeh, desc="Apunta y carga un vehículo"},
+    {nombre="• Lanzar vehículo", accion=_lanzarVeh, desc="Lanza el cargado"},
+    {nombre="• Reparar", accion=function() _repararVeh() end, desc="Repara tu vehículo"},
+    {nombre="• Tunear al máximo", accion=function() _tuneVehicleMax() end, desc="Mejora completa"},
+    {nombre="• Shift Boost", toggle=true, toggleValue=_shiftBoostActive, onToggle=toggleShiftBoost, desc="Aceleración extra con SHIFT"},
+    {nombre="• Enganchar todos (100m)", accion=_attachAllNearbyVehicles, desc="Engancha todos los vehículos cercanos"},
+    {nombre="• Soltar todos", accion=_detachAllVehicles, desc="Desengancha todos"},
+    {nombre="• Voltear", accion=function() _flipVeh() end, desc="Voltea el vehículo"},
+    {nombre="• Limpiar", accion=function() _limpiarVeh() end, desc="Limpia el vehículo"},
+})
+
+RegisterMenuModule("map_fucker", {
+    {nombre="• Bloque stunt gigante", accion=_spawnStuntBlock, desc="Crea bloque enorme"},
+    {nombre="• Spawnear Selva", accion=_createForest, desc="Crea bosque de árboles"},
+})
+
+RegisterMenuModule("protection", {
+    {nombre="• AC Checker", accion=_scanAC, desc="Detecta anticheats conocidos"},
+})
+
+RegisterMenuModule("event_hunter", {
+    {nombre="• Iniciar Event Hunter", accion=_startFuzzing, desc="Prueba eventos comunes"},
+    {nombre="• Ataque Framing (FiveGuard)", accion=function()
+        Notify("~y~Selecciona jugador desde Player List")
+        _G.MenuCurrent = "player_list"
+        _G.MenuOption = 1
+    end, desc="Abre lista de jugadores"},
+})
+
+RegisterMenuModule("server_attacks", {
+    {nombre="• Máquina de lag", toggle=true, toggleValue=_lagEntidades, onToggle=toggleLagMachine, desc="Activa/desactiva lag masivo"},
+    {nombre="• Chat spam", toggle=true, toggleValue=_chatSpamActive, onToggle=toggleChatSpam, desc="Inunda el chat"},
+    {nombre="• Test Godmode exploit", accion=_testGodmodeExploit, desc="Prueba bypass de godmode"},
+    {nombre="• Test Money exploit", accion=_testMoneyExploit, desc="Intenta generar dinero infinito"},
+    {nombre="• Congelar jugador", accion=function()
+        Notify("~y~Selecciona jugador desde Player List")
+        _G.MenuCurrent = "player_list"
+        _G.MenuOption = 1
+    end, desc="Congela a un jugador (desync)"},
+    {nombre="• Crash intent", accion=function()
+        Notify("~y~Selecciona jugador desde Player List")
+        _G.MenuCurrent = "player_list"
+        _G.MenuOption = 1
+    end, desc="Intenta crashear a un jugador"},
+    {nombre="• Desync player", accion=function()
+        Notify("~y~Selecciona jugador desde Player List")
+        _G.MenuCurrent = "player_list"
+        _G.MenuOption = 1
+    end, desc="Envía posiciones falsas constantemente"},
+})
+
+Notify("~g~[SENTEX] Módulos completos cargados (con toggles, dildo persistente, listas dinámicas).")

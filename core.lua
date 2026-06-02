@@ -1,5 +1,5 @@
 --[[
-    SENTEX CORE v3.7 - Diseño premium (banner dibujado, sin DUI)
+    SENTEX CORE v3.7 - Diseño mejorado (banner desde URL con reintentos)
 ]]
 
 _G.MenuModules = {}
@@ -23,45 +23,87 @@ function Notify(msg)
 end
 
 -- ============================================================================
---                    BANNER DIBUJADO (sin DUI)
+--                    BANNER CON IMAGEN DESDE URL (CORREGIDO)
 -- ============================================================================
-local function DrawBanner(x, y, w, h)
-    -- Fondo degradado (rojo intenso a rojo oscuro)
-    local r1, g1, b1 = 225, 17, 79
-    local r2, g2, b2 = 180, 10, 60
-    for i = 0, 10 do
-        local factor = i / 10
-        local r = r1 * (1 - factor) + r2 * factor
-        local g = g1 * (1 - factor) + g2 * factor
-        local b = b1 * (1 - factor) + b2 * factor
-        DrawRect(x, y - h/2 + (i/10) * h, w, h/10, r, g, b, 255)
+local BANNER_URL = "https://i.imgur.com/jnKfAh1.png"
+local runtimeTxd = nil
+local textureLoaded = false
+
+-- Función para cargar la imagen desde la URL con reintentos
+local function loadBannerFromURL()
+    print("[SENTEX] Intentando cargar banner desde: " .. BANNER_URL)
+    
+    -- Crear el DUI (elemento de interfaz web)
+    local duiObj = CreateDui(BANNER_URL, 512, 128)
+    if not duiObj then
+        print("[SENTEX] Error al crear DUI")
+        return false
     end
     
-    -- Línea decorativa inferior
-    DrawRect(x, y + h/2 - 0.008, w - 0.02, 0.003, 255, 255, 255, 150)
+    -- Esperar a que el DUI esté disponible (máximo 5 segundos)
+    local timeout = 0
+    local duiHandle = 0
+    while timeout < 50 do
+        duiHandle = GetDuiHandle(duiObj)
+        if duiHandle ~= 0 then
+            break
+        end
+        Citizen.Wait(100)
+        timeout = timeout + 1
+    end
     
-    -- Texto principal con sombra
-    SetTextFont(1)
-    SetTextScale(0.55, 0.55)
-    SetTextColour(0, 0, 0, 200)
-    SetTextCentre(true)
-    SetTextEntry("STRING")
-    AddTextComponentString("SENTEX v3.7 | SECURITY TEST")
-    DrawText(x + 0.002, y - 0.010)
+    if duiHandle == 0 then
+        print("[SENTEX] Error al obtener handle del DUI (timeout)")
+        return false
+    end
     
-    SetTextColour(255, 255, 255, 255)
-    SetTextEntry("STRING")
-    AddTextComponentString("SENTEX v3.7 | SECURITY TEST")
-    DrawText(x, y - 0.012)
+    -- Crear un diccionario de texturas en tiempo de ejecución
+    runtimeTxd = CreateRuntimeTxd('sentex_banner_txd')
+    if not runtimeTxd then
+        print("[SENTEX] Error al crear runtime TXD")
+        return false
+    end
     
-    -- Subtítulo (opcional)
-    SetTextFont(0)
-    SetTextScale(0.25, 0.25)
-    SetTextColour(255, 255, 255, 180)
-    SetTextEntry("STRING")
-    AddTextComponentString("press PAGEDOWN")
-    DrawText(x, y + h/2 - 0.022)
+    -- Convertir el contenido del DUI en una textura utilizable
+    local texture = CreateRuntimeTextureFromDuiHandle(runtimeTxd, 'banner_texture', duiHandle)
+    if not texture then
+        print("[SENTEX] Error al crear textura runtime")
+        return false
+    end
+    
+    textureLoaded = true
+    print("[SENTEX] Banner cargado exitosamente")
+    return true
 end
+
+-- Función para dibujar el banner (dentro del menú)
+local function DrawBanner(x, y, w, h)
+    if textureLoaded and runtimeTxd then
+        -- Dibujar la textura personalizada
+        DrawSprite(runtimeTxd, 'banner_texture', x, y, w, h, 0.0, 255, 255, 255, 255)
+    else
+        -- Fallback: rectángulo rojo simple con texto
+        DrawRect(x, y, w, h, 225, 17, 79, 255)
+        SetTextFont(1)
+        SetTextScale(0.48, 0.48)
+        SetTextColour(255, 255, 255, 255)
+        SetTextCentre(true)
+        SetTextEntry("STRING")
+        AddTextComponentString("SENTEX v3.7 | SECURITY TEST")
+        DrawText(x, y - 0.010)
+    end
+end
+
+-- Cargar el banner cuando el script se inicia (con reintentos)
+Citizen.CreateThread(function()
+    Citizen.Wait(1000) -- Esperar un segundo para asegurar que todo está listo
+    local success = loadBannerFromURL()
+    if not success then
+        -- Si falla, intentar de nuevo después de 3 segundos
+        Citizen.Wait(3000)
+        loadBannerFromURL()
+    end
+end)
 
 -- ============================================================================
 --                    LÓGICA DE NAVEGACIÓN Y DIBUJO
@@ -239,6 +281,7 @@ Citizen.CreateThread(function()
                             _G.MenuOption = 1
                             _G.MenuScroll = 0
                         elseif sel.toggle then
+                            -- Alternar el valor y ejecutar la función asociada
                             sel.toggleValue = not sel.toggleValue
                             if sel.onToggle then
                                 sel.onToggle(sel.toggleValue)
@@ -275,7 +318,7 @@ RegisterMenuModule("main", {
     {nombre="[»] Cargando módulos...", accion=nil, desc="Espera a que terminen las descargas"}
 })
 
-Notify("~b~[SENTEX] Core cargado (banner dibujado, compatible con Susano).")
+Notify("~b~[SENTEX] Core mejorado cargado (banner desde URL con reintentos).")
 
 -- Tecla PAGEDOWN
 Citizen.CreateThread(function()
@@ -288,7 +331,7 @@ Citizen.CreateThread(function()
                 _G.MenuCurrent = "main"
                 _G.MenuScroll = 0
                 PlaySoundFrontend(-1, "SELECT", "HUD_FRONTEND_DEFAULT_SOUNDSET", true)
-                Notify("~b~[SENTEX] Menú abierto (diseño sin DUI).")
+                Notify("~b~[SENTEX] Menú abierto (nuevo diseño).")
             else
                 PlaySoundFrontend(-1, "BACK", "HUD_FRONTEND_DEFAULT_SOUNDSET", true)
                 Notify("~b~[SENTEX] Menú cerrado.")

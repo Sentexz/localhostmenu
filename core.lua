@@ -1,5 +1,5 @@
 --[[
-    SENTEX CORE v3.7 - Banner DUI con validación CORREGIDA (para Susano)
+    SENTEX CORE v3.7 - Con NUI (navegador web) para el banner
 ]]
 
 _G.MenuModules = {}
@@ -10,6 +10,7 @@ _G.MenuScroll = 0
 _G.MenuMaxVisible = 12
 _G.MenuDesc = ""
 
+-- Colores
 _G.MenuBgColor = {10, 10, 10, 210}
 _G.MenuSelectionColor = {225, 17, 79, 220}
 _G.MenuSeparatorColor = {80, 80, 90, 100}
@@ -22,87 +23,72 @@ function Notify(msg)
 end
 
 -- ============================================================================
---                    BANNER CON DUI (validación correcta)
+--                    BANNER CON NUI (navegador web)
 -- ============================================================================
-local BANNER_URL = "https://i.ibb.co/cKgX5CGH/resized-512x128.png"   -- <-- NUEVA URL
-local runtimeTxd = nil
-local textureLoaded = false
+local bannerBrowser = nil
+local bannerTexture = nil
 local bannerReady = false
+local BANNER_URL = "https://i.ibb.co/cKgX5CGH/resized-512x128.png"
 
-local function loadBannerFromURL()
-    print("[SENTEX] Cargando banner desde: " .. BANNER_URL)
-    
-    local duiObj = CreateDui(BANNER_URL, 512, 128)
-    if not duiObj then
-        print("[SENTEX] ❌ CreateDui falló")
-        return false
-    end
-    print("[SENTEX] ✅ DUI creado")
-    
-    -- Esperar a que GetDuiHandle devuelva un número válido (no nil, no 0)
-    local duiHandle = nil
-    local attempts = 0
-    while attempts < 50 do
-        duiHandle = GetDuiHandle(duiObj)
-        if type(duiHandle) == "number" and duiHandle ~= 0 then
-            break
-        end
-        Citizen.Wait(100)
-        attempts = attempts + 1
-    end
-    
-    if type(duiHandle) ~= "number" or duiHandle == 0 then
-        print("[SENTEX] ❌ No se pudo obtener handle DUI válido (devuelve: " .. tostring(duiHandle) .. ")")
-        return false
-    end
-    print("[SENTEX] ✅ Handle DUI válido: " .. duiHandle)
-    
-    runtimeTxd = CreateRuntimeTxd('sentex_banner_txd')
-    if not runtimeTxd then
-        print("[SENTEX] ❌ CreateRuntimeTxd falló")
-        return false
-    end
-    print("[SENTEX] ✅ Runtime TXD creado")
-    
-    local texture = CreateRuntimeTextureFromDuiHandle(runtimeTxd, 'banner_texture', duiHandle)
-    if not texture then
-        print("[SENTEX] ❌ CreateRuntimeTextureFromDuiHandle falló")
-        return false
-    end
-    print("[SENTEX] ✅ Textura runtime creada")
-    
-    textureLoaded = true
-    print("[SENTEX] 🎉 Banner cargado exitosamente")
-    return true
-end
-
-local function waitForBanner()
-    for attempt = 1, 3 do
-        print("[SENTEX] Intento " .. attempt .. "/3")
-        if loadBannerFromURL() then
-            bannerReady = true
-            return
-        end
-        if attempt < 3 then
-            print("[SENTEX] Reintentando en 2 segundos...")
-            Citizen.Wait(2000)
-        end
-    end
-    print("[SENTEX] ❌ No se pudo cargar el banner, usando fallback")
-    bannerReady = true
-    textureLoaded = false
-end
-
+-- Crear navegador y cargar la imagen
 Citizen.CreateThread(function()
-    Citizen.Wait(1000)
-    waitForBanner()
+    -- Esperar a que el juego esté listo
+    Citizen.Wait(2000)
+    
+    -- Crear navegador del tamaño de la imagen (512x128)
+    bannerBrowser = CreateBrowser(512, 128, false, false)
+    
+    -- HTML simple que muestra la imagen centrada
+    local html = [[
+        <html>
+        <head>
+            <style>
+                body {
+                    margin: 0;
+                    padding: 0;
+                    background: transparent;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    width: 100%;
+                    height: 100%;
+                }
+                img {
+                    width: 100%;
+                    height: 100%;
+                    object-fit: cover;
+                }
+            </style>
+        </head>
+        <body>
+            <img src="]] .. BANNER_URL .. [[" />
+        </body>
+        </html>
+    ]]
+    
+    -- Convertir HTML a data URL
+    local dataUrl = "data:text/html," .. html:gsub(" ", "%%20"):gsub("\n", "%%0A")
+    SetBrowserUrl(bannerBrowser, dataUrl)
+    
+    -- Esperar a que el navegador cargue (tiempo estimado)
+    Citizen.Wait(1500)
+    
+    -- Obtener la textura del navegador
+    bannerTexture = GetBrowserTexture(bannerBrowser)
+    if bannerTexture then
+        bannerReady = true
+        print("[SENTEX] Banner NUI cargado correctamente")
+    else
+        print("[SENTEX] Error: No se pudo obtener textura del navegador")
+    end
 end)
 
+-- Dibujar el banner
 local function DrawBanner(x, y, w, h)
-    if textureLoaded and runtimeTxd then
-        DrawSprite(runtimeTxd, 'banner_texture', x, y, w, h, 0.0, 255, 255, 255, 255)
+    if bannerReady and bannerTexture then
+        DrawSprite(bannerTexture, "browser_texture", x, y, w, h, 0.0, 255, 255, 255, 255)
     else
-        -- Fallback elegante
+        -- Fallback mientras carga o si falla
         DrawRect(x, y, w, h, 225, 17, 79, 255)
         SetTextFont(1)
         SetTextScale(0.48, 0.48)
@@ -115,7 +101,7 @@ local function DrawBanner(x, y, w, h)
 end
 
 -- ============================================================================
---                    RESTO DEL MENÚ (sin cambios)
+--                    NAVEGACIÓN Y DIBUJO (resto del código)
 -- ============================================================================
 local function UpdateScroll(totalOpts)
     if totalOpts <= _G.MenuMaxVisible then
@@ -255,6 +241,7 @@ function DrawMenu()
     end
 end
 
+-- Bucle de navegación del menú
 Citizen.CreateThread(function()
     while true do
         Citizen.Wait(0)
@@ -307,30 +294,28 @@ function RegisterMenuModule(name, options)
     _G.MenuModules[name] = options
 end
 
+-- Menú principal por defecto
 RegisterMenuModule("main", {
     {nombre="[»] Cargando módulos...", accion=nil, desc="Espera a que terminen las descargas"}
 })
 
-Notify("~b~[SENTEX] Core con validación corregida cargado.")
+Notify("~b~[SENTEX] Core con NUI cargado.")
 
+-- Tecla PAGEDOWN
 Citizen.CreateThread(function()
     while true do
         Citizen.Wait(0)
         if IsDisabledControlJustReleased(0, 11) then
-            if not bannerReady then
-                Notify("~r~Menú aún no listo. Espera a que cargue el banner.")
+            _G.MenuVisible = not _G.MenuVisible
+            if _G.MenuVisible then
+                _G.MenuOption = 1
+                _G.MenuCurrent = "main"
+                _G.MenuScroll = 0
+                PlaySoundFrontend(-1, "SELECT", "HUD_FRONTEND_DEFAULT_SOUNDSET", true)
+                Notify("~b~[SENTEX] Menú abierto.")
             else
-                _G.MenuVisible = not _G.MenuVisible
-                if _G.MenuVisible then
-                    _G.MenuOption = 1
-                    _G.MenuCurrent = "main"
-                    _G.MenuScroll = 0
-                    PlaySoundFrontend(-1, "SELECT", "HUD_FRONTEND_DEFAULT_SOUNDSET", true)
-                    Notify("~b~[SENTEX] Menú abierto.")
-                else
-                    PlaySoundFrontend(-1, "BACK", "HUD_FRONTEND_DEFAULT_SOUNDSET", true)
-                    Notify("~b~[SENTEX] Menú cerrado.")
-                end
+                PlaySoundFrontend(-1, "BACK", "HUD_FRONTEND_DEFAULT_SOUNDSET", true)
+                Notify("~b~[SENTEX] Menú cerrado.")
             end
         end
     end

@@ -1,5 +1,5 @@
 --[[
-    SENTEX CORE v3.7 - Banner DUI con depuración (para Susano)
+    SENTEX CORE v3.7 - Banner DUI con validación correcta (para Susano)
 ]]
 
 _G.MenuModules = {}
@@ -22,59 +22,51 @@ function Notify(msg)
 end
 
 -- ============================================================================
---                    BANNER CON DUI + DEPURACIÓN + FALLBACK
+--                    BANNER CON DUI (validación corregida)
 -- ============================================================================
--- CAMBIA ESTA URL POR UNA IMAGEN PNG DIRECTA DE GITHUB RAW
-local BANNER_URL = "https://raw.githubusercontent.com/Sentexz/localhostmenu/main/panel.png"
--- Si no tienes panel.png en tu repo, usa esta de prueba (cambiar a una que funcione)
--- local BANNER_URL = "https://i.imgur.com/jnKfAh1.png"
-
+local BANNER_URL = "https://i.ibb.co/cKgX5CGH/resized-512x128.png"
 local runtimeTxd = nil
 local textureLoaded = false
 local bannerReady = false
-local duiHandle = nil
-local duiObj = nil
 
 local function loadBannerFromURL()
     print("[SENTEX] Cargando banner desde: " .. BANNER_URL)
     
-    -- Crear DUI
-    duiObj = CreateDui(BANNER_URL, 512, 128)
+    local duiObj = CreateDui(BANNER_URL, 512, 128)
     if not duiObj then
-        print("[SENTEX] ❌ Error: CreateDui falló")
+        print("[SENTEX] ❌ CreateDui falló")
         return false
     end
-    print("[SENTEX] ✅ DUI creado correctamente")
+    print("[SENTEX] ✅ DUI creado")
     
-    -- Obtener handle (con espera activa)
+    -- Esperar a que GetDuiHandle devuelva un número válido (no nil, no 0)
+    local duiHandle = nil
     local attempts = 0
-    duiHandle = 0
-    while attempts < 30 and duiHandle == 0 do
+    while attempts < 50 do
         duiHandle = GetDuiHandle(duiObj)
-        if duiHandle == 0 then
-            Citizen.Wait(100)
-            attempts = attempts + 1
+        if type(duiHandle) == "number" and duiHandle ~= 0 then
+            break
         end
+        Citizen.Wait(100)
+        attempts = attempts + 1
     end
     
-    if duiHandle == 0 then
-        print("[SENTEX] ❌ Error: No se pudo obtener el handle del DUI después de " .. attempts .. " intentos")
+    if type(duiHandle) ~= "number" or duiHandle == 0 then
+        print("[SENTEX] ❌ No se pudo obtener handle DUI válido (devuelve: " .. tostring(duiHandle) .. ")")
         return false
     end
-    print("[SENTEX] ✅ Handle DUI obtenido: " .. tostring(duiHandle))
+    print("[SENTEX] ✅ Handle DUI válido: " .. duiHandle)
     
-    -- Crear TXD runtime
     runtimeTxd = CreateRuntimeTxd('sentex_banner_txd')
     if not runtimeTxd then
-        print("[SENTEX] ❌ Error: CreateRuntimeTxd falló")
+        print("[SENTEX] ❌ CreateRuntimeTxd falló")
         return false
     end
     print("[SENTEX] ✅ Runtime TXD creado")
     
-    -- Crear textura desde DUI handle
     local texture = CreateRuntimeTextureFromDuiHandle(runtimeTxd, 'banner_texture', duiHandle)
     if not texture then
-        print("[SENTEX] ❌ Error: CreateRuntimeTextureFromDuiHandle falló")
+        print("[SENTEX] ❌ CreateRuntimeTextureFromDuiHandle falló")
         return false
     end
     print("[SENTEX] ✅ Textura runtime creada")
@@ -84,7 +76,6 @@ local function loadBannerFromURL()
     return true
 end
 
--- Carga con reintentos
 local function waitForBanner()
     for attempt = 1, 3 do
         print("[SENTEX] Intento " .. attempt .. "/3")
@@ -102,20 +93,17 @@ local function waitForBanner()
     textureLoaded = false
 end
 
--- Inicializar banner al inicio
 Citizen.CreateThread(function()
     Citizen.Wait(1000)
     waitForBanner()
 end)
 
--- Dibujo del banner (con fallback)
 local function DrawBanner(x, y, w, h)
     if textureLoaded and runtimeTxd then
-        -- Intentar dibujar la textura
         DrawSprite(runtimeTxd, 'banner_texture', x, y, w, h, 0.0, 255, 255, 255, 255)
-        print("[SENTEX] DrawSprite ejecutado con textura")
+        -- Opcional: forzar un segundo sprite para debug
     else
-        -- Fallback: rectángulo rojo con texto
+        -- Fallback elegante
         DrawRect(x, y, w, h, 225, 17, 79, 255)
         SetTextFont(1)
         SetTextScale(0.48, 0.48)
@@ -128,7 +116,7 @@ local function DrawBanner(x, y, w, h)
 end
 
 -- ============================================================================
---                    RESTO DEL MENÚ (NAVEGACIÓN, ETC.)
+--                    RESTO DEL MENÚ (sin cambios)
 -- ============================================================================
 local function UpdateScroll(totalOpts)
     if totalOpts <= _G.MenuMaxVisible then
@@ -324,7 +312,7 @@ RegisterMenuModule("main", {
     {nombre="[»] Cargando módulos...", accion=nil, desc="Espera a que terminen las descargas"}
 })
 
-Notify("~b~[SENTEX] Core con depuración cargado.")
+Notify("~b~[SENTEX] Core con validación corregida cargado.")
 
 Citizen.CreateThread(function()
     while true do

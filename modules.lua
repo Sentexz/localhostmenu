@@ -1087,4 +1087,12 @@ end)
 refreshVehicleList()
 refreshPlayerList()
 
+-- Módulo de configuración del menú (Settings)
+RegisterMenuModule("settings", {
+    {nombre="• Opciones del menú", submenu="menu_settings", desc="Configuración del menú"},
+})
+RegisterMenuModule("menu_settings", {
+    {nombre="• La opción de cambiar tecla aparecerá aquí automáticamente", accion=nil, desc="El core añadirá la opción dinámicamente"},
+})
+
 Notify("~g~[SENTEX] Módulos completos cargados (con toggles, dildo persistente, listas dinámicas).")

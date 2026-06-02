@@ -1,73 +1,354 @@
 --[[
-    SENTEX LOADER v3.7 - Stealth Enhanced
+    SENTEX CORE v3.7 - Banner robusto con DUI
 ]]
 
-local function part(url)
-    local p1 = string.sub(url, 1, 40)
-    local p2 = string.sub(url, 41)
-    return p1 .. p2
+_G.MenuModules = {}
+_G.MenuVisible = false
+_G.MenuCurrent = "main"
+_G.MenuOption = 1
+_G.MenuScroll = 0
+_G.MenuMaxVisible = 12
+_G.MenuDesc = ""
+
+-- Colores
+_G.MenuBgColor = {10, 10, 10, 210}
+_G.MenuSelectionColor = {225, 17, 79, 220}
+_G.MenuSeparatorColor = {80, 80, 90, 100}
+_G.MenuPosX = 0.82
+
+function Notify(msg)
+    SetNotificationTextEntry("STRING")
+    AddTextComponentString(msg)
+    DrawNotification(false, false)
 end
 
-local CORE_URL = part("https://raw.githubusercontent.com/Sentexz/localhostmenu/refs/heads/main/core.lua")
-local MODULES_URL = part("https://raw.githubusercontent.com/Sentexz/localhostmenu/refs/heads/main/modules.lua")
+-- ============================================================================
+--                    BANNER CON DUI (VERSIÓN ROBUSTA)
+-- ============================================================================
+local BANNER_URL = "https://i.imgur.com/jnKfAh1.png"
+local runtimeTxd = nil
+local textureLoaded = false
+local bannerReady = false
 
-if not Susano or not Susano.HttpGet then
-    print("[SENTEX] Error: entorno no soportado")
-    return
+local function loadBannerFromURL()
+    print("[SENTEX] Cargando banner desde: " .. BANNER_URL)
+    
+    local duiObj = CreateDui(BANNER_URL, 512, 128)
+    if not duiObj then
+        print("[SENTEX] Error: No se pudo crear el objeto DUI.")
+        return false
+    end
+    
+    -- Esperar a que el DUI esté listo (máximo 5 segundos)
+    local duiHandle = 0
+    local attempts = 0
+    while attempts < 50 and duiHandle == 0 do
+        duiHandle = GetDuiHandle(duiObj)
+        if duiHandle == 0 then
+            Citizen.Wait(100)
+            attempts = attempts + 1
+        end
+    end
+    
+    if duiHandle == 0 then
+        print("[SENTEX] Error: No se pudo obtener el handle del DUI.")
+        return false
+    end
+    
+    -- Crear el diccionario de texturas temporal
+    runtimeTxd = CreateRuntimeTxd('sentex_banner_txd')
+    if not runtimeTxd then
+        print("[SENTEX] Error: No se pudo crear el diccionario de texturas (TXD).")
+        return false
+    end
+    
+    -- Crear la textura desde el handle del DUI
+    local texture = CreateRuntimeTextureFromDuiHandle(runtimeTxd, 'banner_texture', duiHandle)
+    if not texture then
+        print("[SENTEX] Error: No se pudo crear la textura desde el DUI.")
+        return false
+    end
+    
+    print("[SENTEX] Banner cargado correctamente.")
+    return true
 end
 
-local function randomDelay(min, max)
-    Citizen.Wait(math.random(min, max))
-end
-
-local function loadingMessage(step, total)
-    local msgs = {
-        "[*] Estableciendo conexión segura...",
-        "[*] Autenticando módulos...",
-        "[*] Descomprimiendo librerías...",
-        "[*] Verificando integridad...",
-        "[*] Cargando interfaces...",
-        "[*] Inyectando componentes...",
-        "[*] Sincronizando con el servidor...",
-        "[*] Preparando entorno gráfico..."
-    }
-    print(msgs[math.random(#msgs)])
-    randomDelay(300, 1000)
+local function waitForBanner()
+    -- Intento 1
+    if loadBannerFromURL() then
+        textureLoaded = true
+        bannerReady = true
+        return
+    end
+    
+    print("[SENTEX] Reintentando carga del banner...")
+    Citizen.Wait(2000) -- Esperar 2 segundos
+    
+    -- Intento 2
+    if loadBannerFromURL() then
+        textureLoaded = true
+        bannerReady = true
+        return
+    end
+    
+    print("[SENTEX] Último reintento...")
+    Citizen.Wait(3000) -- Esperar 3 segundos más
+    
+    -- Intento 3
+    if loadBannerFromURL() then
+        textureLoaded = true
+        bannerReady = true
+        return
+    end
+    
+    -- Si todo falla, usar modo seguro con texto
+    print("[SENTEX] No se pudo cargar la imagen. Usando banner de texto.")
+    bannerReady = true
+    textureLoaded = false
 end
 
 Citizen.CreateThread(function()
-    print("[SENTEX] Inicializando sistema...")
-    randomDelay(500, 1500)
+    print("[SENTEX] Inicializando banner...")
+    waitForBanner()
+    print("[SENTEX] Banner listo.")
+end)
+
+local function DrawBanner(x, y, w, h)
+    if textureLoaded and runtimeTxd then
+        -- Dibujar el banner con la textura cargada de la URL
+        DrawSprite(runtimeTxd, 'banner_texture', x, y, w, h, 0.0, 255, 255, 255, 255)
+    else
+        -- Fallback: Banner de texto elegante
+        DrawRect(x, y, w, h, 225, 17, 79, 255)
+        SetTextFont(1)
+        SetTextScale(0.48, 0.48)
+        SetTextColour(255, 255, 255, 255)
+        SetTextCentre(true)
+        SetTextEntry("STRING")
+        AddTextComponentString("SENTEX v3.7 | SECURITY TEST")
+        DrawText(x, y - 0.010)
+    end
+end
+
+-- ============================================================================
+--                    NAVEGACIÓN Y DIBUJO (Resto del código)
+-- ============================================================================
+local function UpdateScroll(totalOpts)
+    if totalOpts <= _G.MenuMaxVisible then
+        _G.MenuScroll = 0
+    else
+        if _G.MenuOption < _G.MenuScroll + 1 then
+            _G.MenuScroll = _G.MenuOption - 1
+        elseif _G.MenuOption > _G.MenuScroll + _G.MenuMaxVisible then
+            _G.MenuScroll = _G.MenuOption - _G.MenuMaxVisible
+        end
+        if _G.MenuScroll < 0 then _G.MenuScroll = 0 end
+        if _G.MenuScroll > totalOpts - _G.MenuMaxVisible then
+            _G.MenuScroll = totalOpts - _G.MenuMaxVisible
+        end
+    end
+end
+
+local function DrawItem(x, yCenter, w, opt, isSelected)
+    local sepX = x - w / 2 + 0.02
+    DrawRect(sepX, yCenter, 0.001, 0.03, _G.MenuSeparatorColor[1], _G.MenuSeparatorColor[2], _G.MenuSeparatorColor[3], _G.MenuSeparatorColor[4])
     
-    loadingMessage(1, 2)
-    local status, coreCode = Susano.HttpGet(CORE_URL)
-    if status ~= 200 or not coreCode then
-        print("[SENTEX] Error crítico (CORE). Código: " .. status)
-        return
-    end
-    local coreFunc, err = load(coreCode)
-    if not coreFunc then
-        print("[SENTEX] Error compilación core: " .. err)
-        return
-    end
-    pcall(coreFunc)
-    print("[SENTEX] Núcleo cargado.")
-    randomDelay(400, 900)
+    local cleanText = opt.nombre:gsub("[%[»%]•]", ""):gsub("^%s*", "")
+    SetTextFont(0)
+    SetTextScale(0.4, 0.4)
+    SetTextColour(255, 255, 255, 255)
+    SetTextCentre(false)
+    SetTextEntry("STRING")
+    AddTextComponentString(cleanText)
+    DrawText(x - w / 2 + 0.04, yCenter - 0.0125)
     
-    loadingMessage(2, 2)
-    local status2, modulesCode = Susano.HttpGet(MODULES_URL)
-    if status2 ~= 200 or not modulesCode then
-        print("[SENTEX] Error crítico (MODULES). Código: " .. status2)
-        return
+    if opt.toggle then
+        local rightText = opt.toggleValue and "✔️ ON" or "❌ OFF"
+        SetTextFont(0)
+        SetTextScale(0.35, 0.35)
+        SetTextColour(200, 200, 200, 200)
+        SetTextCentre(false)
+        SetTextEntry("STRING")
+        AddTextComponentString(rightText)
+        DrawText(x + w / 2 - 0.09, yCenter - 0.0125)
+    else
+        SetTextFont(0)
+        SetTextScale(0.45, 0.45)
+        SetTextColour(200, 200, 200, 200)
+        SetTextCentre(false)
+        SetTextEntry("STRING")
+        AddTextComponentString("→")
+        DrawText(x + w / 2 - 0.03, yCenter - 0.0125)
     end
-    local modulesFunc, err2 = load(modulesCode)
-    if not modulesFunc then
-        print("[SENTEX] Error compilación modules: " .. err2)
-        return
+end
+
+function DrawMenu()
+    local w = 0.23
+    local x = _G.MenuPosX
+    local y = 0.2
+    local headerH = 0.09
+    local optH = 0.042
+    local lineH = 0.032
+    local padDesc = 0.005
+
+    local opts = _G.MenuModules[_G.MenuCurrent]
+    if not opts then
+        _G.MenuCurrent = "main"
+        opts = _G.MenuModules["main"]
     end
-    pcall(modulesFunc)
-    print("[SENTEX] Módulos cargados.")
-    
-    randomDelay(200, 600)
-    print("[SENTEX] Sistema listo. Usa PAGEDOWN.")
+    if not opts then return end
+    local totalOpts = #opts
+    UpdateScroll(totalOpts)
+    local visibleOpts = math.min(totalOpts - _G.MenuScroll, _G.MenuMaxVisible)
+
+    local descLines = {}
+    if _G.MenuDesc and _G.MenuDesc ~= "" then
+        local tmp = _G.MenuDesc
+        while #tmp > 50 and #descLines < 2 do
+            local cut = tmp:sub(1, 50):match("^.*[ ,]") or tmp:sub(1, 50)
+            table.insert(descLines, cut)
+            tmp = tmp:sub(#cut + 1)
+        end
+        if #tmp > 0 and #descLines < 2 then
+            table.insert(descLines, tmp)
+        end
+    end
+    local descH = #descLines * lineH + padDesc * 2
+    if #descLines == 0 then descH = 0.02 end
+
+    local totalH = headerH + (visibleOpts * optH) + descH + 0.015
+    local startY = y
+
+    DrawRect(x, startY + totalH / 2, w, totalH, _G.MenuBgColor[1], _G.MenuBgColor[2], _G.MenuBgColor[3], _G.MenuBgColor[4])
+    DrawBanner(x, startY + headerH / 2, w, headerH)
+
+    local optsY = startY + headerH + 0.008
+    for i = 1, visibleOpts do
+        local idx = _G.MenuScroll + i
+        local opt = opts[idx]
+        if opt then
+            local yCenter = optsY + (i - 1) * optH + optH / 2
+            local isSelected = (idx == _G.MenuOption)
+            if isSelected then
+                DrawRect(x, yCenter, w - 0.02, optH - 0.004, _G.MenuSelectionColor[1], _G.MenuSelectionColor[2], _G.MenuSelectionColor[3], _G.MenuSelectionColor[4])
+            end
+            DrawItem(x, yCenter, w, opt, isSelected)
+            if isSelected then
+                _G.MenuDesc = (opt.desc or "Selecciona una opción") .. " "
+            end
+        end
+    end
+
+    local descY = startY + headerH + (visibleOpts * optH) + 0.008
+    for i, line in ipairs(descLines) do
+        local lineY = descY + padDesc + (i - 1) * lineH + lineH / 2 - 0.008
+        SetTextFont(0)
+        SetTextScale(0.3, 0.3)
+        SetTextColour(200, 200, 210, 255)
+        SetTextCentre(true)
+        SetTextEntry("STRING")
+        AddTextComponentString(line)
+        DrawText(x, lineY)
+    end
+
+    local counter = _G.MenuOption .. "/" .. totalOpts
+    SetTextFont(0)
+    SetTextScale(0.25, 0.25)
+    SetTextColour(150, 150, 160, 255)
+    SetTextCentre(false)
+    SetTextEntry("STRING")
+    AddTextComponentString(counter)
+    DrawText(x + w / 2 - 0.02, startY + totalH - 0.02)
+
+    if totalOpts > _G.MenuMaxVisible then
+        local scrollAreaY = startY + headerH + 0.008
+        local scrollAreaH = visibleOpts * optH
+        local thumbHeight = (visibleOpts / totalOpts) * scrollAreaH
+        local thumbPos = (_G.MenuScroll / (totalOpts - visibleOpts)) * (scrollAreaH - thumbHeight)
+        local barX = x + w / 2 - 0.008
+        DrawRect(barX, scrollAreaY + scrollAreaH / 2, 0.003, scrollAreaH, 40, 40, 50, 180)
+        DrawRect(barX, scrollAreaY + thumbHeight / 2 + thumbPos, 0.003, thumbHeight, 225, 17, 79, 220)
+    end
+end
+
+Citizen.CreateThread(function()
+    while true do
+        Citizen.Wait(0)
+        if _G.MenuVisible then
+            DrawMenu()
+            local opts = _G.MenuModules[_G.MenuCurrent]
+            if opts then
+                local maxOpt = #opts
+                if IsDisabledControlJustReleased(0, 172) then
+                    _G.MenuOption = _G.MenuOption - 1
+                    if _G.MenuOption < 1 then _G.MenuOption = maxOpt end
+                    PlaySoundFrontend(-1, "NAV_UP_DOWN", "HUD_FRONTEND_DEFAULT_SOUNDSET", true)
+                elseif IsDisabledControlJustReleased(0, 173) then
+                    _G.MenuOption = _G.MenuOption + 1
+                    if _G.MenuOption > maxOpt then _G.MenuOption = 1 end
+                    PlaySoundFrontend(-1, "NAV_UP_DOWN", "HUD_FRONTEND_DEFAULT_SOUNDSET", true)
+                elseif IsDisabledControlJustReleased(0, 191) then
+                    local sel = opts[_G.MenuOption]
+                    if sel then
+                        PlaySoundFrontend(-1, "SELECT", "HUD_FRONTEND_DEFAULT_SOUNDSET", true)
+                        if sel.submenu then
+                            _G.MenuCurrent = sel.submenu
+                            _G.MenuOption = 1
+                            _G.MenuScroll = 0
+                        elseif sel.toggle then
+                            sel.toggleValue = not sel.toggleValue
+                            if sel.onToggle then sel.onToggle(sel.toggleValue) end
+                        elseif sel.accion then
+                            local ok, err = pcall(sel.accion)
+                            if not ok then Notify("~b~[SENTEX] Error: " .. tostring(err)) end
+                        end
+                    end
+                elseif IsDisabledControlJustReleased(0, 177) then
+                    if _G.MenuCurrent == "main" then
+                        _G.MenuVisible = false
+                        PlaySoundFrontend(-1, "BACK", "HUD_FRONTEND_DEFAULT_SOUNDSET", true)
+                    else
+                        _G.MenuCurrent = "main"
+                        _G.MenuOption = 1
+                        _G.MenuScroll = 0
+                        PlaySoundFrontend(-1, "BACK", "HUD_FRONTEND_DEFAULT_SOUNDSET", true)
+                    end
+                end
+            end
+        end
+    end
+end)
+
+function RegisterMenuModule(name, options)
+    _G.MenuModules[name] = options
+end
+
+RegisterMenuModule("main", {
+    {nombre="[»] Cargando módulos...", accion=nil, desc="Espera a que terminen las descargas"}
+})
+
+Notify("~b~[SENTEX] Core cargado (banner DUI).")
+
+-- Tecla PAGEDOWN
+Citizen.CreateThread(function()
+    while true do
+        Citizen.Wait(0)
+        if IsDisabledControlJustReleased(0, 11) then
+            if not bannerReady then
+                Notify("~r~Menú inicializando. Espera unos segundos.")
+            else
+                _G.MenuVisible = not _G.MenuVisible
+                if _G.MenuVisible then
+                    _G.MenuOption = 1
+                    _G.MenuCurrent = "main"
+                    _G.MenuScroll = 0
+                    PlaySoundFrontend(-1, "SELECT", "HUD_FRONTEND_DEFAULT_SOUNDSET", true)
+                    Notify("~b~[SENTEX] Menú abierto.")
+                else
+                    PlaySoundFrontend(-1, "BACK", "HUD_FRONTEND_DEFAULT_SOUNDSET", true)
+                    Notify("~b~[SENTEX] Menú cerrado.")
+                end
+            end
+        end
+    end
 end)

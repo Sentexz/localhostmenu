@@ -1,5 +1,5 @@
 --[[
-    SENTEX CORE v3.7 - Diseño mejorado (banner con imagen y toggles)
+    SENTEX CORE v3.7 - Diseño mejorado (banner desde URL con reintentos)
 ]]
 
 _G.MenuModules = {}
@@ -25,24 +25,34 @@ end
 -- ============================================================================
 --                    BANNER CON IMAGEN DESDE URL (CORREGIDO)
 -- ============================================================================
-local BANNER_URL = "https://i.imgur.com/jnKfAh1.png" -- <--- TU ENLACE
+local BANNER_URL = "https://i.imgur.com/jnKfAh1.png"
 local runtimeTxd = nil
 local textureLoaded = false
 
--- Función para cargar la imagen desde la URL
+-- Función para cargar la imagen desde la URL con reintentos
 local function loadBannerFromURL()
     print("[SENTEX] Intentando cargar banner desde: " .. BANNER_URL)
     
-    -- Crear el DUI (elemento de interfaz web invisible)
+    -- Crear el DUI (elemento de interfaz web)
     local duiObj = CreateDui(BANNER_URL, 512, 128)
     if not duiObj then
         print("[SENTEX] Error al crear DUI")
         return false
     end
     
+    -- Esperar a que el DUI esté disponible (máximo 5 segundos)
+    local timeout = 0
+    while timeout < 50 do
+        if GetDuiHandle(duiObj) ~= 0 then
+            break
+        end
+        Citizen.Wait(100)
+        timeout = timeout + 1
+    end
+    
     local duiHandle = GetDuiHandle(duiObj)
-    if not duiHandle then
-        print("[SENTEX] Error al obtener handle del DUI")
+    if not duiHandle or duiHandle == 0 then
+        print("[SENTEX] Error al obtener handle del DUI (timeout)")
         return false
     end
     
@@ -71,7 +81,7 @@ local function DrawBanner(x, y, w, h)
         -- Dibujar la textura personalizada
         DrawSprite(runtimeTxd, 'banner_texture', x, y, w, h, 0.0, 255, 255, 255, 255)
     else
-        -- Fallback: rectángulo rojo simple por si algo falla
+        -- Fallback: rectángulo rojo simple con texto
         DrawRect(x, y, w, h, 225, 17, 79, 255)
         SetTextFont(1)
         SetTextScale(0.48, 0.48)
@@ -83,10 +93,15 @@ local function DrawBanner(x, y, w, h)
     end
 end
 
--- Cargar el banner cuando el script se inicia
+-- Cargar el banner cuando el script se inicia (con reintentos)
 Citizen.CreateThread(function()
     Citizen.Wait(1000) -- Esperar un segundo para asegurar que todo está listo
-    loadBannerFromURL()
+    local success = loadBannerFromURL()
+    if not success then
+        -- Si falla, intentar de nuevo después de 3 segundos
+        Citizen.Wait(3000)
+        loadBannerFromURL()
+    end
 end)
 
 -- ============================================================================
@@ -108,7 +123,7 @@ local function UpdateScroll(totalOpts)
     end
 end
 
--- Dibujo de cada ítem (ahora con soporte para toggle)
+-- Dibujo de cada ítem (con soporte para toggle)
 local function DrawItem(x, yCenter, w, opt, isSelected)
     local sepX = x - w / 2 + 0.02
     DrawRect(sepX, yCenter, 0.001, 0.03, _G.MenuSeparatorColor[1], _G.MenuSeparatorColor[2], _G.MenuSeparatorColor[3], _G.MenuSeparatorColor[4])
@@ -302,7 +317,7 @@ RegisterMenuModule("main", {
     {nombre="[»] Cargando módulos...", accion=nil, desc="Espera a que terminen las descargas"}
 })
 
-Notify("~b~[SENTEX] Core mejorado cargado (banner desde URL).")
+Notify("~b~[SENTEX] Core mejorado cargado (banner desde URL con reintentos).")
 
 -- Tecla PAGEDOWN
 Citizen.CreateThread(function()
